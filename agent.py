@@ -50,7 +50,8 @@ def fetch_transcript(url: str) -> str:
         return f"Kunne ikke finde et gyldigt YouTube-video-ID i: {url}"
 
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        api = YouTubeTranscriptApi()
+        transcript_list = api.list(video_id)
 
         # Forsøg dansk, derefter engelsk, derefter hvad der er tilgængeligt
         try:
@@ -61,7 +62,7 @@ def fetch_transcript(url: str) -> str:
             )
 
         entries = transcript.fetch()
-        text = " ".join(entry["text"] for entry in entries)
+        text = " ".join(entry.get("text", "") for entry in entries)
         language = transcript.language
         return f"[Transskript på {language}]\n\n{text}"
 
