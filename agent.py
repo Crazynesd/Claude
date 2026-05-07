@@ -1,7 +1,9 @@
 import re
-import requests
-from bs4 import BeautifulSoup
+import os
+import tempfile
 import anthropic
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
 
 client = anthropic.Anthropic()
 
@@ -31,21 +33,70 @@ SYSTEM = (
     "Præsenter derefter transskriptet pænt og tilbyd at hjælpe med at opsummere, analysere eller besvare spørgsmål om indholdet."
 )
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "da-DK,da;q=0.9,en-US;q=0.8,en;q=0.7",
-    "Referer": "https://youtubetotranscript.com/",
-}
-
 
 def extract_video_id(url: str) -> str | None:
     match = re.search(r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})", url)
     return match.group(1) if match else None
+
+
+def fetch_via_api(video_id: str) -> str:
+    """Hent transskript direkte fra YouTubes caption-data (hurtigt)."""
+    api = YouTubeTranscriptApi()
+    transcript_list = api.list(video_id)
+
+    try:
+        transcript = transcript_list.find_transcript(["da", "en"])
+    except NoTranscriptFound:
+        transcript = transcript_list.find_generated_transcript(
+            [t.language_code for t in transcript_list]
+        )
+
+    entries = transcript.fetch()
+    text = " ".join(entry.get("text", "") for entry in entries)
+    return f"[Transskript på {transcript.language}]\n\n{text}"
+
+
+def fetch_via_whisper(url: str) -> str:
+    """Download lyd og transskriber med Whisper (fungerer på alle videoer)."""
+    try:
+        import yt_dlp
+        import whisper
+    except ImportError:
+        return (
+            "Whisper-fallback kræver ekstra pakker. Kør:\n"
+            "  pip install yt-dlp openai-whisper"
+        )
+
+    print("[Ingen captions fundet — downloader lyd og transcriberer med Whisper...]")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_path = os.path.join(tmpdir, "audio.mp3")
+
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": audio_path,
+            "quiet": True,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+            }],
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        # Find den downloadede fil (yt-dlp tilføjer extension)
+        files = [f for f in os.listdir(tmpdir) if f.endswith(".mp3")]
+        if not files:
+            return "Kunne ikke downloade lyden fra videoen."
+
+        actual_path = os.path.join(tmpdir, files[0])
+
+        print("[Transcriberer med Whisper — dette kan tage nogle minutter...]")
+        model = whisper.load_model("base")
+        result = model.transcribe(actual_path)
+
+    return f"[Transskript via Whisper]\n\n{result['text']}"
 
 
 def fetch_transcript(url: str) -> str:
@@ -53,33 +104,16 @@ def fetch_transcript(url: str) -> str:
     if not video_id:
         return f"Kunne ikke finde et gyldigt YouTube-video-ID i: {url}"
 
-    transcript_url = f"https://youtubetotranscript.com/transcript?v={video_id}"
-
+    # Forsøg 1: direkte via YouTubes captions (hurtigt)
     try:
-        response = requests.get(transcript_url, headers=HEADERS, timeout=15)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        return f"Fejl ved hentning fra youtubetotranscript.com: {e}"
+        return fetch_via_api(video_id)
+    except (TranscriptsDisabled, NoTranscriptFound):
+        pass
+    except Exception as e:
+        print(f"[Caption-hentning fejlede: {e} — prøver Whisper...]")
 
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    # Siden viser transskriptet i <span>-tags med data-start attribut
-    spans = soup.find_all("span", attrs={"data-start": True})
-    if spans:
-        text = " ".join(s.get_text(strip=True) for s in spans)
-        return f"[Transskript hentet via youtubetotranscript.com]\n\n{text}"
-
-    # Fallback: prøv div med id eller klasse der indeholder 'transcript'
-    for selector in ["#transcript", ".transcript", "[class*='transcript']"]:
-        container = soup.select_one(selector)
-        if container:
-            text = container.get_text(separator=" ", strip=True)
-            if len(text) > 100:
-                return f"[Transskript hentet via youtubetotranscript.com]\n\n{text}"
-
-    # Debug: returner sidens titel så vi ved hvad der skete
-    title = soup.title.string if soup.title else "ukendt"
-    return f"Kunne ikke finde transskript på siden. Side-titel: '{title}'"
+    # Forsøg 2: download lyd og transskriber med Whisper
+    return fetch_via_whisper(url)
 
 
 def run_tool(tool_name: str, tool_input: dict) -> str:
@@ -110,7 +144,6 @@ def chat():
 
         messages.append({"role": "user", "content": user_input})
 
-        # Agentic loop
         while True:
             response = client.messages.create(
                 model="claude-opus-4-7",
