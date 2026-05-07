@@ -50,7 +50,7 @@ def fetch_via_api(video_id: str) -> str:
         )
 
     entries = transcript.fetch()
-    text = " ".join(entry.get("text", "") for entry in entries)
+    text = " ".join(getattr(entry, "text", entry.get("text", "") if isinstance(entry, dict) else "") for entry in entries)
     return f"[Transskript på {transcript.language}]\n\n{text}"
 
 
