@@ -1,8 +1,7 @@
 import re
-import sys
+import requests
+from bs4 import BeautifulSoup
 import anthropic
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
 
 client = anthropic.Anthropic()
 
@@ -32,16 +31,21 @@ SYSTEM = (
     "Præsenter derefter transskriptet pænt og tilbyd at hjælpe med at opsummere, analysere eller besvare spørgsmål om indholdet."
 )
 
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "da-DK,da;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Referer": "https://youtubetotranscript.com/",
+}
+
 
 def extract_video_id(url: str) -> str | None:
-    patterns = [
-        r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, url)
-        if match:
-            return match.group(1)
-    return None
+    match = re.search(r"(?:v=|youtu\.be/|embed/|shorts/)([A-Za-z0-9_-]{11})", url)
+    return match.group(1) if match else None
 
 
 def fetch_transcript(url: str) -> str:
@@ -49,29 +53,33 @@ def fetch_transcript(url: str) -> str:
     if not video_id:
         return f"Kunne ikke finde et gyldigt YouTube-video-ID i: {url}"
 
+    transcript_url = f"https://youtubetotranscript.com/transcript?v={video_id}"
+
     try:
-        api = YouTubeTranscriptApi()
-        transcript_list = api.list(video_id)
+        response = requests.get(transcript_url, headers=HEADERS, timeout=15)
+        response.raise_for_status()
+    except requests.RequestException as e:
+        return f"Fejl ved hentning fra youtubetotranscript.com: {e}"
 
-        # Forsøg dansk, derefter engelsk, derefter hvad der er tilgængeligt
-        try:
-            transcript = transcript_list.find_transcript(["da", "en"])
-        except NoTranscriptFound:
-            transcript = transcript_list.find_generated_transcript(
-                [t.language_code for t in transcript_list]
-            )
+    soup = BeautifulSoup(response.text, "html.parser")
 
-        entries = transcript.fetch()
-        text = " ".join(entry.get("text", "") for entry in entries)
-        language = transcript.language
-        return f"[Transskript på {language}]\n\n{text}"
+    # Siden viser transskriptet i <span>-tags med data-start attribut
+    spans = soup.find_all("span", attrs={"data-start": True})
+    if spans:
+        text = " ".join(s.get_text(strip=True) for s in spans)
+        return f"[Transskript hentet via youtubetotranscript.com]\n\n{text}"
 
-    except TranscriptsDisabled:
-        return "Transskripter er deaktiveret for denne video."
-    except NoTranscriptFound:
-        return "Ingen transskripter fundet for denne video."
-    except Exception as e:
-        return f"Fejl ved hentning af transskript: {e}"
+    # Fallback: prøv div med id eller klasse der indeholder 'transcript'
+    for selector in ["#transcript", ".transcript", "[class*='transcript']"]:
+        container = soup.select_one(selector)
+        if container:
+            text = container.get_text(separator=" ", strip=True)
+            if len(text) > 100:
+                return f"[Transskript hentet via youtubetotranscript.com]\n\n{text}"
+
+    # Debug: returner sidens titel så vi ved hvad der skete
+    title = soup.title.string if soup.title else "ukendt"
+    return f"Kunne ikke finde transskript på siden. Side-titel: '{title}'"
 
 
 def run_tool(tool_name: str, tool_input: dict) -> str:
