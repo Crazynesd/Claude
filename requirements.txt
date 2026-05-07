@@ -1,4 +1,2 @@
 anthropic
 youtube-transcript-api
-yt-dlp
-openai-whisper

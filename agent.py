@@ -1,6 +1,4 @@
 import re
-import os
-import tempfile
 import anthropic
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound
@@ -56,64 +54,19 @@ def fetch_via_api(video_id: str) -> str:
     return f"[Transskript på {transcript.language}]\n\n{text}"
 
 
-def fetch_via_whisper(url: str) -> str:
-    """Download lyd og transskriber med Whisper (fungerer på alle videoer)."""
-    try:
-        import yt_dlp
-        import whisper
-    except ImportError:
-        return (
-            "Whisper-fallback kræver ekstra pakker. Kør:\n"
-            "  pip install yt-dlp openai-whisper"
-        )
-
-    print("[Ingen captions fundet — downloader lyd og transcriberer med Whisper...]")
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        audio_path = os.path.join(tmpdir, "audio.mp3")
-
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": audio_path,
-            "quiet": True,
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "mp3",
-            }],
-        }
-
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-
-        # Find den downloadede fil (yt-dlp tilføjer extension)
-        files = [f for f in os.listdir(tmpdir) if f.endswith(".mp3")]
-        if not files:
-            return "Kunne ikke downloade lyden fra videoen."
-
-        actual_path = os.path.join(tmpdir, files[0])
-
-        print("[Transcriberer med Whisper — dette kan tage nogle minutter...]")
-        model = whisper.load_model("base")
-        result = model.transcribe(actual_path)
-
-    return f"[Transskript via Whisper]\n\n{result['text']}"
-
-
 def fetch_transcript(url: str) -> str:
     video_id = extract_video_id(url)
     if not video_id:
         return f"Kunne ikke finde et gyldigt YouTube-video-ID i: {url}"
 
-    # Forsøg 1: direkte via YouTubes captions (hurtigt)
     try:
         return fetch_via_api(video_id)
-    except (TranscriptsDisabled, NoTranscriptFound):
-        pass
+    except TranscriptsDisabled:
+        return "Denne video har deaktiverede undertekster — transskript er ikke tilgængeligt."
+    except NoTranscriptFound:
+        return "Ingen undertekster fundet for denne video."
     except Exception as e:
-        print(f"[Caption-hentning fejlede: {e} — prøver Whisper...]")
-
-    # Forsøg 2: download lyd og transskriber med Whisper
-    return fetch_via_whisper(url)
+        return f"Fejl ved hentning af transskript: {e}"
 
 
 def run_tool(tool_name: str, tool_input: dict) -> str:
