@@ -99,22 +99,17 @@ def analyze(transcript, speaker, url):
         ANALYSIS_PROMPT
         + f"\n\nSpeaker: {speaker}\nURL: {url}\nDato: {today}\n\nTranskript:\n{transcript}"
     )
-    last_err = None
-    for attempt in range(3):
-        try:
-            resp = client.messages.create(
-                model="claude-opus-4-7",
-                max_tokens=16000,
-                messages=[{"role": "user", "content": prompt}],
-                timeout=600,
-            )
-            return resp.content[0].text
-        except (anthropic.APIConnectionError, anthropic.APIStatusError) as e:
-            last_err = e
-            wait = 2 ** attempt
-            print(f"  API-fejl ({e}) — venter {wait}s og prøver igen...")
-            time.sleep(wait)
-    raise last_err
+    chunks = []
+    with client.messages.stream(
+        model="claude-opus-4-7",
+        max_tokens=16000,
+        messages=[{"role": "user", "content": prompt}],
+    ) as stream:
+        for text in stream.text_stream:
+            chunks.append(text)
+            print(".", end="", flush=True)
+    print()
+    return "".join(chunks)
 
 
 def parse_and_save(analysis, speaker_slug):
