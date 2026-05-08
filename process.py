@@ -1,5 +1,6 @@
 import re
 import sys
+import time
 from datetime import date
 from pathlib import Path
 import anthropic
@@ -8,11 +9,17 @@ from youtube_transcript_api._errors import NoTranscriptFound
 
 client = anthropic.Anthropic()
 
-DRIVE_BASE = (
-    Path.home()
-    / "Library/CloudStorage/GoogleDrive-isaac@mallismedia.dk"
-    / "My Drive/Main Claude/ecom-agents"
-)
+
+def find_drive_base():
+    cloud = Path.home() / "Library/CloudStorage"
+    for entry in cloud.glob("GoogleDrive-*"):
+        candidate = entry / "My Drive/Main Claude/ecom-agents"
+        if candidate.exists():
+            return candidate
+    raise FileNotFoundError(f"Kunne ikke finde ecom-agents under {cloud}")
+
+
+DRIVE_BASE = find_drive_base()
 
 SUBDOMAINS = {
     "creative-strategist": ["winning-ads-analysis", "hooks", "new-concept-briefs"],
@@ -92,12 +99,22 @@ def analyze(transcript, speaker, url):
         ANALYSIS_PROMPT
         + f"\n\nSpeaker: {speaker}\nURL: {url}\nDato: {today}\n\nTranskript:\n{transcript}"
     )
-    resp = client.messages.create(
-        model="claude-opus-4-7",
-        max_tokens=16000,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return resp.content[0].text
+    last_err = None
+    for attempt in range(3):
+        try:
+            resp = client.messages.create(
+                model="claude-opus-4-7",
+                max_tokens=16000,
+                messages=[{"role": "user", "content": prompt}],
+                timeout=600,
+            )
+            return resp.content[0].text
+        except (anthropic.APIConnectionError, anthropic.APIStatusError) as e:
+            last_err = e
+            wait = 2 ** attempt
+            print(f"  API-fejl ({e}) — venter {wait}s og prøver igen...")
+            time.sleep(wait)
+    raise last_err
 
 
 def parse_and_save(analysis, speaker_slug):
@@ -143,6 +160,10 @@ def process(speaker, url):
     analysis = analyze(transcript, speaker, url)
     print(f"[3/3] Gemmer knowledge-filer...")
     saved = parse_and_save(analysis, slugify(speaker))
+    if not saved:
+        debug_path = DRIVE_BASE / f"_debug_{date.today().isoformat()}_{slugify(speaker)}_{vid}.txt"
+        debug_path.write_text(analysis, encoding="utf-8")
+        print(f"  ⚠ Ingen filer parset. Rå output gemt: {debug_path}")
     for p in saved:
         print(f"  ✓ {p}")
     return saved
