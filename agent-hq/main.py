@@ -1,7 +1,6 @@
 import os
 import json
 import asyncio
-import subprocess
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -22,42 +21,21 @@ KNOWLEDGE_DIR = Path("/root/knowledge")
 API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 client = anthropic.Anthropic(api_key=API_KEY) if API_KEY else None
 
-SYSTEM_PROMPTS = {
-    "creative-strategist": """Du er Creative Strategist for Jens Christian Health.
-Jens Christian Health er et dansk premium health tracker wristband (DKK 2.499 vejl.).
-Målgruppe: Ambitiøse professionelle 28-45 år, Skandinavien.
-Kanaler: Meta, TikTok, YouTube, nordiske influencers. Solgt DTC via Shopify + Amazon Nordic.
-
-Din rolle: Kreative strategier, kampagnekoncepeter, brand positioning, UGC-koncepter, creative briefs.
-Svar altid på dansk med mindre andet anmodes.""",
-
-    "copy-agent": """Du er Copy Agent for Jens Christian Health.
-Jens Christian Health er et dansk premium health tracker wristband (DKK 2.499 vejl.).
-Målgruppe: Ambitiøse professionelle 28-45 år, Skandinavien.
-Kanaler: Meta, TikTok, YouTube, nordiske influencers. Solgt DTC via Shopify + Amazon Nordic.
-
-Din rolle: Konverterende copy — Meta-annoncer, email, landing pages, TikTok-scripts, produkttekster.
-Svar altid på dansk med mindre andet anmodes.""",
-
-    "performance-analyst": """Du er Performance Analyst for Jens Christian Health.
-Jens Christian Health er et dansk premium health tracker wristband (DKK 2.499 vejl.).
-Målgruppe: Ambitiøse professionelle 28-45 år, Skandinavien.
-Kanaler: Meta, TikTok, YouTube, nordiske influencers. Solgt DTC via Shopify + Amazon Nordic.
-
-Din rolle: Marketing performance analyse, ROAS/CPA/CTR/LTV, kanalanalyse, anomaly detection, budget-anbefalinger.
-Svar altid på dansk med mindre andet anmodes.""",
-
-    "lifecycle-crm": """Du er Lifecycle CRM specialist for Jens Christian Health.
-Jens Christian Health er et dansk premium health tracker wristband (DKK 2.499 vejl.).
-Målgruppe: Ambitiøse professionelle 28-45 år, Skandinavien.
-Kanaler: Meta, TikTok, YouTube, nordiske influencers. Solgt DTC via Shopify + Amazon Nordic.
-
-Din rolle: Klaviyo email-flows, segmentering, retention-strategier, Shopify + Segment integration, win-back kampagner.
-Svar altid på dansk med mindre andet anmodes.""",
+AGENT_ROLES = {
+    "creative-strategist": "kreative strategier, kampagnekoncepeter, brand positioning, UGC-koncepter og creative briefs",
+    "copy-agent": "konverterende copy — Meta-annoncer, email, landing pages, TikTok-scripts og produkttekster",
+    "performance-analyst": "marketing performance analyse, ROAS/CPA/CTR/LTV, kanalanalyse, anomaly detection og budget-anbefalinger",
+    "lifecycle-crm": "Klaviyo email-flows, segmentering, retention-strategier, Shopify + Segment integration og win-back kampagner",
 }
 
+BRAND_CONTEXT = """Brand: Jens Christian Health
+- Dansk premium health tracker wristband, DKK 2.499 vejl.
+- Målgruppe: Ambitiøse professionelle 28-45 år, Skandinavien
+- Kanaler: Meta, TikTok, YouTube, nordiske influencers
+- Salg: DTC via Shopify + Amazon Nordic"""
 
-def get_knowledge(agent_name: str) -> str:
+
+def get_knowledge() -> str:
     parts = []
     if not KNOWLEDGE_DIR.exists():
         return ""
@@ -80,11 +58,30 @@ def get_knowledge(agent_name: str) -> str:
 
 
 def build_system_prompt(agent_name: str) -> str:
-    base = SYSTEM_PROMPTS.get(agent_name, "Du er en hjælpsom AI-assistent. Svar på dansk.")
-    knowledge = get_knowledge(agent_name)
-    if knowledge:
-        return base + f"\n\nVidensbase (fra YouTube-transkripter):\n{knowledge}"
-    return base
+    role = AGENT_ROLES.get(agent_name, agent_name)
+    knowledge = get_knowledge()
+
+    if not knowledge:
+        return f"""Du er {agent_name} for Jens Christian Health.
+{BRAND_CONTEXT}
+
+Din rolle: {role}.
+
+VIGTIGT: Du har endnu ikke adgang til nogen vidensbase. Sig det eksplicit til brugeren og bed dem uploade YouTube-transkripter via Knowledge Base sektionen. Svar ikke med generel viden — kun med hvad der er i din vidensbase.
+
+Svar altid på dansk."""
+
+    return f"""Du er {agent_name} for Jens Christian Health.
+{BRAND_CONTEXT}
+
+Din rolle: {role}.
+
+Du må KUN basere dine svar på den vidensbase der er givet nedenfor. Brug ikke din generelle træningsviden til at lave anbefalinger — hvis svaret ikke findes i vidensbasen, sig det eksplicit og referér til hvilke emner der er dækket.
+
+Svar altid på dansk.
+
+Vidensbase (fra YouTube-transkripter processeret af dine specialistagenter):
+{knowledge}"""
 
 
 async def sse_stream(gen: AsyncGenerator) -> StreamingResponse:
@@ -108,13 +105,12 @@ async def stream_claude(messages: list, system: str = "") -> AsyncGenerator[str,
         yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
 
-# ── Config ────────────────────────────────────────────────────────────────────
 @app.get("/api/config")
 def get_config():
-    return {"api_key_set": bool(API_KEY)}
+    knowledge = get_knowledge()
+    return {"api_key_set": bool(API_KEY), "knowledge_loaded": bool(knowledge)}
 
 
-# ── Brands ────────────────────────────────────────────────────────────────────
 @app.get("/api/brands")
 def list_brands():
     conn = get_conn()
@@ -156,7 +152,6 @@ def approval_queue(brand_id: int):
     return [dict(r) for r in rows]
 
 
-# ── Agents ────────────────────────────────────────────────────────────────────
 class StatusUpdate(BaseModel):
     status: str
 
@@ -170,7 +165,6 @@ def update_agent_status(agent_id: int, body: StatusUpdate):
     return {"ok": True}
 
 
-# ── Reports ───────────────────────────────────────────────────────────────────
 class ReportUpdate(BaseModel):
     status: str
 
@@ -184,7 +178,6 @@ def update_report(report_id: int, body: ReportUpdate):
     return {"ok": True}
 
 
-# ── Messages ──────────────────────────────────────────────────────────────────
 @app.get("/api/brands/{brand_id}/agents/{agent_id}/messages")
 def get_messages(brand_id: int, agent_id: int):
     conn = get_conn()
@@ -212,7 +205,6 @@ def clear_messages(brand_id: int, agent_id: int):
     return {"ok": True}
 
 
-# ── Chat ──────────────────────────────────────────────────────────────────────
 class AgentChatRequest(BaseModel):
     message: str
 
@@ -282,7 +274,6 @@ async def test_chat(body: TestChatRequest):
     return await sse_stream(stream_claude(body.messages))
 
 
-# ── Knowledge / YouTube Queue ─────────────────────────────────────────────────
 class QueueItem(BaseModel):
     url: str
     speaker: str
@@ -333,7 +324,7 @@ def knowledge_status():
     rows = conn.execute("SELECT status, COUNT(*) as n FROM youtube_queue GROUP BY status").fetchall()
     conn.close()
     counts = {r["status"]: r["n"] for r in rows}
-    return {"counts": counts, "running": False}
+    return {"counts": counts, "running": _processing}
 
 
 _log_queue: asyncio.Queue = asyncio.Queue()
@@ -413,10 +404,9 @@ async def knowledge_log():
                              headers={"Cache-Control": "no-cache"})
 
 
-# ── Static files + index ──────────────────────────────────────────────────────
 app.mount("/static", StaticFiles(directory="/root/agent-hq/static"), name="static")
 
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return (Path("/root/agent-hq/static/index.html")).read_text(encoding="utf-8")
+    return Path("/root/agent-hq/static/index.html").read_text(encoding="utf-8")
