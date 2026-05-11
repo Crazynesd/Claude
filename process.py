@@ -9,17 +9,9 @@ from youtube_transcript_api._errors import NoTranscriptFound
 
 client = anthropic.Anthropic()
 
-
-def find_drive_base():
-    cloud = Path.home() / "Library/CloudStorage"
-    for entry in cloud.glob("GoogleDrive-*"):
-        candidate = entry / "My Drive/Main Claude/ecom-agents"
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError(f"Kunne ikke finde ecom-agents under {cloud}")
-
-
-DRIVE_BASE = find_drive_base()
+# Local Mac path — no Google Drive needed
+DRIVE_BASE = Path.home() / "Main Claude" / "ecom-agents"
+DRIVE_BASE.mkdir(parents=True, exist_ok=True)
 
 SUBDOMAINS = {
     "creative-strategist": ["winning-ads-analysis", "hooks", "new-concept-briefs"],
@@ -158,9 +150,9 @@ def process(speaker, url):
     if not saved:
         debug_path = DRIVE_BASE / f"_debug_{date.today().isoformat()}_{slugify(speaker)}_{vid}.txt"
         debug_path.write_text(analysis, encoding="utf-8")
-        print(f"  ⚠ Ingen filer parset. Rå output gemt: {debug_path}")
+        print(f"  Ingen filer parset. Rå output gemt: {debug_path}")
     for p in saved:
-        print(f"  ✓ {p}")
+        print(f"  Gemt: {p}")
     return saved
 
 

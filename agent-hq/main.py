@@ -1,16 +1,13 @@
 # -*- coding: utf-8 -*-
-import sys
 import os
 import json
 import sqlite3
-import asyncio
 from pathlib import Path
 from datetime import datetime
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import anthropic
 from dotenv import load_dotenv
@@ -27,6 +24,15 @@ client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 BRANDS = [
     {"id": "jens-christian-health", "name": "Jens Christian Health"},
+]
+
+AGENTS = [
+    "creative-strategist",
+    "copy-agent",
+    "performance-analyst",
+    "lifecycle-crm",
+    "seo-content",
+    "reporting",
 ]
 
 
@@ -65,25 +71,37 @@ init_db()
 
 
 def get_knowledge_context(brand_id: str) -> str:
-    """Load knowledge files relevant to a brand."""
+    """
+    Reads from the nested structure that process.py creates:
+    /root/knowledge/{agent}/{subdomain}/_knowledge/*.md
+    """
     context_parts = []
-    brand_dir = KNOWLEDGE_DIR / brand_id
-    global_dir = KNOWLEDGE_DIR
 
-    for search_dir in [global_dir, brand_dir]:
-        if search_dir.exists():
-            for f in sorted(search_dir.glob("*.txt"))[:5]:
+    # Scan all agent/_knowledge folders
+    for agent_dir in sorted(KNOWLEDGE_DIR.iterdir()):
+        if not agent_dir.is_dir() or agent_dir.name.startswith("_"):
+            continue
+        for sub_dir in sorted(agent_dir.iterdir()):
+            if not sub_dir.is_dir():
+                continue
+            knowledge_dir = sub_dir / "_knowledge"
+            if not knowledge_dir.exists():
+                continue
+            files = sorted(knowledge_dir.glob("*.md"), reverse=True)[:3]  # newest 3 per subdomain
+            for f in files:
                 try:
                     text = f.read_text(encoding="utf-8")
-                    context_parts.append(f"=== {f.name} ===\n{text[:3000]}")
+                    label = f"{agent_dir.name}/{sub_dir.name}/{f.name}"
+                    context_parts.append(f"=== {label} ===\n{text[:4000]}")
                 except Exception:
                     pass
-            for f in sorted(search_dir.glob("*.md"))[:3]:
-                try:
-                    text = f.read_text(encoding="utf-8")
-                    context_parts.append(f"=== {f.name} ===\n{text[:3000]}")
-                except Exception:
-                    pass
+
+    # Also load any flat .md/.txt files directly in /root/knowledge/
+    for f in sorted(KNOWLEDGE_DIR.glob("*.md"))[:5]:
+        try:
+            context_parts.append(f"=== {f.name} ===\n{f.read_text(encoding='utf-8')[:3000]}")
+        except Exception:
+            pass
 
     return "\n\n".join(context_parts)
 
@@ -128,11 +146,13 @@ async def stream_claude_response(brand_id: str, message: str, testing_mode: bool
         else:
             brand_name = next((b["name"] for b in BRANDS if b["id"] == brand_id), brand_id)
             knowledge = get_knowledge_context(brand_id)
+            knowledge_section = knowledge if knowledge else "Ingen knowledge-filer fundet endnu. Kør batch.py på Mac og sync til serveren."
             system_prompt = f"""Du er Director — en intelligent AI-assistent for {brand_name}.
-Du hjælper med marketing, content, strategi og analyse.
+Du hjælper med marketing, content, strategi og analyse baseret på den vidensbase du har adgang til.
 Du svarer altid på dansk med mindre andet anmodes.
 
-Vidénsbase:\n{knowledge if knowledge else 'Ingen vidensbase uploadet endnu.'}"""
+Vidensbase (fra YouTube-transkripter analyseret af dine specialistagenter):
+{knowledge_section}"""
             history = get_chat_history(brand_id)
 
         history.append({"role": "user", "content": message})
@@ -147,7 +167,6 @@ Vidénsbase:\n{knowledge if knowledge else 'Ingen vidensbase uploadet endnu.'}""
         ) as stream:
             for text_chunk in stream.text_stream:
                 full_response += text_chunk
-                safe_chunk = text_chunk.replace("\n", "\\n")
                 payload = json.dumps({"text": text_chunk}, ensure_ascii=False)
                 yield f"data: {payload}\n\n"
 
@@ -167,17 +186,13 @@ async def chat(request: ChatRequest):
     return StreamingResponse(
         stream_claude_response(request.brand_id, request.message, request.testing_mode),
         media_type="text/event-stream; charset=utf-8",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        }
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     )
 
 
 @app.get("/history/{brand_id}")
 async def get_history(brand_id: str):
-    history = get_chat_history(brand_id, limit=50)
-    return {"messages": history}
+    return {"messages": get_chat_history(brand_id, limit=50)}
 
 
 @app.delete("/history/{brand_id}")
@@ -222,8 +237,16 @@ async def list_urls():
 async def list_knowledge():
     files = []
     if KNOWLEDGE_DIR.exists():
-        for f in sorted(KNOWLEDGE_DIR.rglob("*")):
-            if f.is_file() and f.suffix in (".txt", ".md", ".json"):
+        for f in sorted(KNOWLEDGE_DIR.rglob("*.md")):
+            if f.is_file():
+                files.append({
+                    "name": f.name,
+                    "path": str(f.relative_to(KNOWLEDGE_DIR)),
+                    "size": f.stat().st_size,
+                    "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()
+                })
+        for f in sorted(KNOWLEDGE_DIR.rglob("*.txt")):
+            if f.is_file():
                 files.append({
                     "name": f.name,
                     "path": str(f.relative_to(KNOWLEDGE_DIR)),
@@ -277,24 +300,20 @@ HTML = """
   .panel h2 { font-size: 1rem; font-weight: 600; color: #fff; margin-bottom: 16px; }
   .card { background: #1e1e2e; border: 1px solid #2a2a3a; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
   .card h3 { font-size: 0.875rem; color: #ccc; margin-bottom: 8px; }
-  .card p, .card .value { font-size: 0.8rem; color: #888; }
-  input[type=text], input[type=url] { background: #1e1e2e; border: 1px solid #2a2a3a; color: #e0e0e0; padding: 10px 14px; border-radius: 8px; font-size: 0.875rem; width: 100%; outline: none; }
-  input[type=text]:focus, input[type=url]:focus { border-color: #6c63ff; }
+  .card p { font-size: 0.8rem; color: #888; }
+  code { background: #13131c; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.8rem; }
+  input[type=url] { background: #1e1e2e; border: 1px solid #2a2a3a; color: #e0e0e0; padding: 10px 14px; border-radius: 8px; font-size: 0.875rem; width: 100%; outline: none; }
+  input[type=url]:focus { border-color: #6c63ff; }
   .btn { background: #6c63ff; color: #fff; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; font-size: 0.875rem; font-weight: 600; }
   .btn:hover { background: #5a52e0; }
-  .btn-danger { background: #ff4444; }
-  .btn-danger:hover { background: #cc3333; }
   .url-list { margin-top: 12px; }
-  .url-item { background: #13131c; border: 1px solid #2a2a3a; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; font-size: 0.8rem; }
-  .url-item .url-text { color: #9d96ff; word-break: break-all; }
-  .url-item .url-meta { color: #555; margin-top: 4px; }
+  .url-item, .file-item { background: #13131c; border: 1px solid #2a2a3a; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; font-size: 0.8rem; }
+  .url-text, .file-name { color: #9d96ff; word-break: break-all; }
+  .url-meta, .file-meta { color: #555; font-size: 0.72rem; margin-top: 4px; }
   .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; }
   .status-pending { background: #ff990022; color: #ff9900; border: 1px solid #ff990044; }
   .status-done { background: #00cc6622; color: #00cc66; border: 1px solid #00cc6644; }
-  .file-item { background: #13131c; border: 1px solid #2a2a3a; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; font-size: 0.8rem; }
-  .file-name { color: #9d96ff; }
-  .file-meta { color: #555; font-size: 0.72rem; margin-top: 2px; }
-  .testing-banner { background: #ff4444; color: white; text-align: center; padding: 8px; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.05em; }
+  .testing-banner { background: #c0392b; color: white; text-align: center; padding: 8px; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.05em; }
   .clear-btn { background: none; border: 1px solid #2a2a3a; color: #666; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; }
   .clear-btn:hover { border-color: #ff4444; color: #ff4444; }
   .header-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
@@ -382,11 +401,14 @@ HTML = """
       <div class="panel">
         <h2>&#128218; Vidensbase</h2>
         <div class="card">
-          <h3>Filer p&#229; serveren</h3>
-          <p style="margin-bottom:12px">Filer ligger i <code style="color:#9d96ff">/root/knowledge/</code> &mdash; upload via scp fra din Mac:</p>
-          <code style="color:#888;font-size:0.8rem">scp din-fil.txt root@187.124.17.73:/root/knowledge/</code>
+          <h3>Synkroniser fra Mac</h3>
+          <p style="margin-bottom:10px">K&#248;r f&#248;rst <code>batch.py</code> p&#229; din Mac. Filer gemmes i <code>~/Main Claude/ecom-agents/</code>.</p>
+          <p style="margin-bottom:6px">Sync til serveren med:</p>
+          <code style="display:block;padding:10px;margin-top:6px;line-height:1.8">
+            scp -r ~/"Main Claude"/ecom-agents/ root@187.124.17.73:/root/knowledge/
+          </code>
         </div>
-        <div id="knowledge-files" class="url-list"></div>
+        <div id="knowledge-files" class="url-list"><div style="color:#555;font-size:0.8rem">Indl&#230;ser...</div></div>
       </div>
     </div>
 
@@ -400,7 +422,7 @@ HTML = """
             <input type="url" id="new-url" placeholder="https://www.youtube.com/watch?v=..." />
             <button class="btn" onclick="addUrl()">Tilf&#248;j</button>
           </div>
-          <p style="margin-top:8px;font-size:0.75rem;color:#555">URLs behandles p&#229; din Mac med batch.py og synkroniseres automatisk.</p>
+          <p style="margin-top:8px;font-size:0.75rem;color:#555">URLs behandles p&#229; din Mac med <code>batch.py</code> og synkroniseres manuelt til serveren.</p>
         </div>
         <div id="url-list" class="url-list"></div>
       </div>
@@ -410,24 +432,24 @@ HTML = """
 </div>
 
 <script>
-const localHistory = {};
-
 function switchTab(el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  const tabId = 'tab-' + el.dataset.tab;
-  document.getElementById(tabId).classList.add('active');
+  document.getElementById('tab-' + el.dataset.tab).classList.add('active');
   if (el.dataset.tab === 'knowledge') loadKnowledge();
   if (el.dataset.tab === 'urls') loadUrls();
   if (el.dataset.tab.startsWith('chat-') && el.dataset.tab !== 'chat-testing') {
-    const brandId = el.dataset.tab.replace('chat-', '');
-    loadHistory(brandId);
+    loadHistory(el.dataset.tab.replace('chat-', ''));
   }
 }
 
+function escapeHtml(text) {
+  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 function formatTime() {
-  return new Date().toLocaleTimeString('da-DK', {hour:'2-digit',minute:'2-digit'});
+  return new Date().toLocaleTimeString('da-DK', {hour:'2-digit', minute:'2-digit'});
 }
 
 function appendMessage(brandId, role, content) {
@@ -441,10 +463,6 @@ function appendMessage(brandId, role, content) {
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
   return div;
-}
-
-function escapeHtml(text) {
-  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 async function loadHistory(brandId) {
@@ -474,7 +492,6 @@ async function sendMessage(brandId) {
   input.value = '';
   input.style.height = 'auto';
   sendBtn.disabled = true;
-
   appendMessage(brandId, 'user', message);
 
   const typingEl = document.getElementById('typing-' + brandId);
@@ -485,7 +502,6 @@ async function sendMessage(brandId) {
   assistantDiv.className = 'message assistant';
   const bubble = document.createElement('div');
   bubble.className = 'message-bubble';
-  bubble.textContent = '';
   const meta = document.createElement('div');
   meta.className = 'message-meta';
   meta.textContent = 'Director • ' + formatTime();
@@ -493,21 +509,18 @@ async function sendMessage(brandId) {
   assistantDiv.appendChild(meta);
   container.appendChild(assistantDiv);
 
-  const isTestingMode = brandId === 'testing';
-
   try {
     const response = await fetch('/chat', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({brand_id: brandId, message: message, testing_mode: isTestingMode})
+      body: JSON.stringify({brand_id: brandId, message, testing_mode: brandId === 'testing'})
     });
 
+    typingEl.classList.remove('visible');
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
     let fullText = '';
-
-    typingEl.classList.remove('visible');
 
     while (true) {
       const {done, value} = await reader.read();
@@ -516,18 +529,17 @@ async function sendMessage(brandId) {
       const lines = buffer.split('\n');
       buffer = lines.pop();
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const payload = line.slice(6);
-          if (payload === '[DONE]') break;
-          try {
-            const parsed = JSON.parse(payload);
-            if (parsed.text) {
-              fullText += parsed.text;
-              bubble.textContent = fullText;
-              container.scrollTop = container.scrollHeight;
-            }
-          } catch(e) {}
-        }
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6);
+        if (payload === '[DONE]') break;
+        try {
+          const parsed = JSON.parse(payload);
+          if (parsed.text) {
+            fullText += parsed.text;
+            bubble.textContent = fullText;
+            container.scrollTop = container.scrollHeight;
+          }
+        } catch(e) {}
       }
     }
   } catch(e) {
@@ -540,10 +552,7 @@ async function sendMessage(brandId) {
 }
 
 function handleKey(e, brandId) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage(brandId);
-  }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(brandId); }
   const ta = e.target;
   ta.style.height = 'auto';
   ta.style.height = Math.min(ta.scrollHeight, 160) + 'px';
@@ -556,7 +565,7 @@ async function addUrl() {
   await fetch('/urls', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({url: url})
+    body: JSON.stringify({url})
   });
   urlInput.value = '';
   loadUrls();
@@ -583,18 +592,19 @@ async function loadKnowledge() {
   const data = await res.json();
   const list = document.getElementById('knowledge-files');
   if (!data.files.length) {
-    list.innerHTML = '<div style="color:#555;font-size:0.8rem">Ingen filer fundet i /root/knowledge/</div>';
+    list.innerHTML = '<div style="color:#555;font-size:0.8rem">Ingen filer fundet. Sync fra Mac med scp først.</div>';
     return;
   }
   list.innerHTML = data.files.map(f => `
     <div class="file-item">
       <div class="file-name">${escapeHtml(f.name)}</div>
-      <div class="file-meta">${f.path} &bull; ${(f.size/1024).toFixed(1)} KB &bull; ${f.modified.slice(0,16)}</div>
+      <div class="file-meta">${escapeHtml(f.path)} &bull; ${(f.size/1024).toFixed(1)} KB &bull; ${f.modified.slice(0,16)}</div>
     </div>
   `).join('');
 }
 
 loadHistory('jens-christian-health');
+loadKnowledge();
 </script>
 </body>
 </html>
