@@ -26,6 +26,7 @@ AGENT_ROLES = {
     "copy-agent": "konverterende copy — Meta-annoncer, email, landing pages, TikTok-scripts og produkttekster",
     "performance-analyst": "marketing performance analyse, ROAS/CPA/CTR/LTV, kanalanalyse, anomaly detection og budget-anbefalinger",
     "lifecycle-crm": "Klaviyo email-flows, segmentering, retention-strategier, Shopify + Segment integration og win-back kampagner",
+    "testing": "generel sparringspartner på tværs af kreativ strategi, copy, performance og CRM",
 }
 
 BRAND_CONTEXT = """Brand: Jens Christian Health
@@ -271,7 +272,8 @@ async def agent_chat(brand_id: int, agent_id: int, body: AgentChatRequest):
 
 @app.post("/api/chat/test")
 async def test_chat(body: TestChatRequest):
-    return await sse_stream(stream_claude(body.messages))
+    system = build_system_prompt("testing")
+    return await sse_stream(stream_claude(body.messages, system))
 
 
 class QueueItem(BaseModel):
