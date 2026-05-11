@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import asyncio
 from pathlib import Path
@@ -22,18 +23,12 @@ API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 client = anthropic.Anthropic(api_key=API_KEY) if API_KEY else None
 
 AGENT_ROLES = {
-    "creative-strategist": "kreative strategier, kampagnekoncepeter, brand positioning, UGC-koncepter og creative briefs",
+    "creative-strategist": "kreative strategier, kampagnekoncepter, brand positioning, UGC-koncepter og creative briefs",
     "copy-agent": "konverterende copy — Meta-annoncer, email, landing pages, TikTok-scripts og produkttekster",
     "performance-analyst": "marketing performance analyse, ROAS/CPA/CTR/LTV, kanalanalyse, anomaly detection og budget-anbefalinger",
     "lifecycle-crm": "Klaviyo email-flows, segmentering, retention-strategier, Shopify + Segment integration og win-back kampagner",
     "testing": "generel sparringspartner på tværs af kreativ strategi, copy, performance og CRM",
 }
-
-BRAND_CONTEXT = """Brand: Jens Christian Health
-- Dansk premium health tracker wristband, DKK 2.499 vejl.
-- Målgruppe: Ambitiøse professionelle 28-45 år, Skandinavien
-- Kanaler: Meta, TikTok, YouTube, nordiske influencers
-- Salg: DTC via Shopify + Amazon Nordic"""
 
 
 def get_knowledge() -> str:
@@ -58,30 +53,29 @@ def get_knowledge() -> str:
     return "\n\n".join(parts)
 
 
-def build_system_prompt(agent_name: str) -> str:
+def build_system_prompt(agent_name: str, brand_context: str = "") -> str:
     role = AGENT_ROLES.get(agent_name, agent_name)
     knowledge = get_knowledge()
+    brand_section = f"\nBrand-kontekst:\n{brand_context}\n" if brand_context else ""
 
     if not knowledge:
-        return f"""Du er {agent_name} for Jens Christian Health.
-{BRAND_CONTEXT}
-
+        return f"""Du er {agent_name}.
+{brand_section}
 Din rolle: {role}.
 
 VIGTIGT: Du har endnu ikke adgang til nogen vidensbase. Sig det eksplicit til brugeren og bed dem uploade YouTube-transkripter via Knowledge Base sektionen. Svar ikke med generel viden — kun med hvad der er i din vidensbase.
 
 Svar altid på dansk."""
 
-    return f"""Du er {agent_name} for Jens Christian Health.
-{BRAND_CONTEXT}
-
+    return f"""Du er {agent_name}.
+{brand_section}
 Din rolle: {role}.
 
 Du må KUN basere dine svar på den vidensbase der er givet nedenfor. Brug ikke din generelle træningsviden til at lave anbefalinger — hvis svaret ikke findes i vidensbasen, sig det eksplicit og referér til hvilke emner der er dækket.
 
 Svar altid på dansk.
 
-Vidensbase (fra YouTube-transkripter processeret af dine specialistagenter):
+Vidensbase (fra YouTube-transkripter):
 {knowledge}"""
 
 
@@ -118,6 +112,73 @@ def list_brands():
     rows = conn.execute("SELECT * FROM brands ORDER BY id").fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+class BrandCreate(BaseModel):
+    name: str
+    context: str = ""
+
+
+@app.post("/api/brands")
+def create_brand(body: BrandCreate):
+    from datetime import datetime
+    slug = re.sub(r'[^a-z0-9]+', '-', body.name.lower()).strip('-')
+    conn = get_conn()
+    base_slug = slug
+    i = 1
+    while conn.execute("SELECT id FROM brands WHERE slug=?", (slug,)).fetchone():
+        slug = f"{base_slug}-{i}"
+        i += 1
+    conn.execute(
+        "INSERT INTO brands (name, slug, context, created_at) VALUES (?,?,?,?)",
+        (body.name, slug, body.context, datetime.utcnow().isoformat())
+    )
+    conn.commit()
+    brand_id = conn.execute("SELECT id FROM brands WHERE slug=?", (slug,)).fetchone()["id"]
+    agents = [
+        (brand_id, "creative-strategist", "Creative Strategist", "creative-strategist", "idle"),
+        (brand_id, "copy-agent",          "Copy Agent",           "copy-agent",          "idle"),
+        (brand_id, "performance-analyst", "Performance Analyst",  "performance-analyst", "idle"),
+        (brand_id, "lifecycle-crm",       "Lifecycle CRM",        "lifecycle-crm",       "idle"),
+    ]
+    conn.executemany(
+        "INSERT OR IGNORE INTO agents (brand_id, name, display_name, role, status) VALUES (?,?,?,?,?)",
+        agents
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True, "slug": slug}
+
+
+class BrandUpdate(BaseModel):
+    name: str = None
+    context: str = None
+
+
+@app.patch("/api/brands/{brand_id}")
+def update_brand(brand_id: int, body: BrandUpdate):
+    conn = get_conn()
+    brand = conn.execute("SELECT * FROM brands WHERE id=?", (brand_id,)).fetchone()
+    if not brand:
+        conn.close()
+        raise HTTPException(404, "Brand not found")
+    name = body.name if body.name is not None else brand["name"]
+    context = body.context if body.context is not None else brand["context"]
+    slug = re.sub(r'[^a-z0-9]+', '-', name.lower()).strip('-')
+    conn.execute("UPDATE brands SET name=?, slug=?, context=? WHERE id=?",
+                 (name, slug, context, brand_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "slug": slug}
+
+
+@app.delete("/api/brands/{brand_id}")
+def delete_brand(brand_id: int):
+    conn = get_conn()
+    conn.execute("DELETE FROM brands WHERE id=?", (brand_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 @app.get("/api/brands/{brand_id}/agents")
@@ -221,6 +282,8 @@ async def agent_chat(brand_id: int, agent_id: int, body: AgentChatRequest):
     if not agent:
         conn.close()
         raise HTTPException(404, "Agent not found")
+    brand = conn.execute("SELECT * FROM brands WHERE id=?", (brand_id,)).fetchone()
+    brand_context = brand["context"] if brand else ""
 
     from datetime import datetime
     now = datetime.utcnow().isoformat()
@@ -246,7 +309,7 @@ async def agent_chat(brand_id: int, agent_id: int, body: AgentChatRequest):
     conn.commit()
     conn.close()
 
-    system = build_system_prompt(agent["name"])
+    system = build_system_prompt(agent["name"], brand_context)
     accumulated = []
 
     async def gen():
@@ -371,12 +434,12 @@ async def run_processor():
             if proc.returncode == 0:
                 conn.execute("UPDATE youtube_queue SET status='done', processed_at=? WHERE id=?",
                              (datetime.utcnow().isoformat(), row["id"]))
-                await _log_queue.put({"line": f"  ✓ Done"})
+                await _log_queue.put({"line": "  ✓ Done"})
             else:
                 err = "\n".join(lines[-3:])
                 conn.execute("UPDATE youtube_queue SET status='error', error_msg=? WHERE id=?",
                              (err[:500], row["id"]))
-                await _log_queue.put({"line": f"  ✗ Error"})
+                await _log_queue.put({"line": "  ✗ Error"})
             conn.commit()
             conn.close()
         except Exception as e:
