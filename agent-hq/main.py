@@ -1,469 +1,422 @@
-# -*- coding: utf-8 -*-
 import os
 import json
-import sqlite3
+import asyncio
+import subprocess
 from pathlib import Path
-from datetime import datetime
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import anthropic
-from dotenv import load_dotenv
 
-load_dotenv()
+from database import get_conn, init_db, seed_data
+
+init_db()
+seed_data()
 
 app = FastAPI()
 
-DB_PATH = "/root/agent-hq/agent_hq.db"
 KNOWLEDGE_DIR = Path("/root/knowledge")
-KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
+API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+client = anthropic.Anthropic(api_key=API_KEY) if API_KEY else None
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+SYSTEM_PROMPTS = {
+    "creative-strategist": """Du er Creative Strategist for Jens Christian Health.
+Jens Christian Health er et dansk premium health tracker wristband (DKK 2.499 vejl.).
+Målgruppe: Ambitiøse professionelle 28-45 år, Skandinavien.
+Kanaler: Meta, TikTok, YouTube, nordiske influencers. Solgt DTC via Shopify + Amazon Nordic.
 
-BRANDS = [
-    {"id": "jens-christian-health", "name": "Jens Christian Health"},
-]
+Din rolle: Kreative strategier, kampagnekoncepeter, brand positioning, UGC-koncepter, creative briefs.
+Svar altid på dansk med mindre andet anmodes.""",
 
+    "copy-agent": """Du er Copy Agent for Jens Christian Health.
+Jens Christian Health er et dansk premium health tracker wristband (DKK 2.499 vejl.).
+Målgruppe: Ambitiøse professionelle 28-45 år, Skandinavien.
+Kanaler: Meta, TikTok, YouTube, nordiske influencers. Solgt DTC via Shopify + Amazon Nordic.
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+Din rolle: Konverterende copy — Meta-annoncer, email, landing pages, TikTok-scripts, produkttekster.
+Svar altid på dansk med mindre andet anmodes.""",
 
+    "performance-analyst": """Du er Performance Analyst for Jens Christian Health.
+Jens Christian Health er et dansk premium health tracker wristband (DKK 2.499 vejl.).
+Målgruppe: Ambitiøse professionelle 28-45 år, Skandinavien.
+Kanaler: Meta, TikTok, YouTube, nordiske influencers. Solgt DTC via Shopify + Amazon Nordic.
 
-def init_db():
-    conn = get_db()
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            brand_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS youtube_urls (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            url TEXT NOT NULL UNIQUE,
-            title TEXT,
-            status TEXT DEFAULT 'pending',
-            brand_id TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.commit()
-    conn.close()
+Din rolle: Marketing performance analyse, ROAS/CPA/CTR/LTV, kanalanalyse, anomaly detection, budget-anbefalinger.
+Svar altid på dansk med mindre andet anmodes.""",
+
+    "lifecycle-crm": """Du er Lifecycle CRM specialist for Jens Christian Health.
+Jens Christian Health er et dansk premium health tracker wristband (DKK 2.499 vejl.).
+Målgruppe: Ambitiøse professionelle 28-45 år, Skandinavien.
+Kanaler: Meta, TikTok, YouTube, nordiske influencers. Solgt DTC via Shopify + Amazon Nordic.
+
+Din rolle: Klaviyo email-flows, segmentering, retention-strategier, Shopify + Segment integration, win-back kampagner.
+Svar altid på dansk med mindre andet anmodes.""",
+}
 
 
-init_db()
-
-
-def get_knowledge_context(brand_id: str) -> str:
-    context_parts = []
+def get_knowledge(agent_name: str) -> str:
+    parts = []
+    if not KNOWLEDGE_DIR.exists():
+        return ""
     for agent_dir in sorted(KNOWLEDGE_DIR.iterdir()):
         if not agent_dir.is_dir() or agent_dir.name.startswith("_"):
             continue
         for sub_dir in sorted(agent_dir.iterdir()):
             if not sub_dir.is_dir():
                 continue
-            knowledge_dir = sub_dir / "_knowledge"
-            if not knowledge_dir.exists():
+            kdir = sub_dir / "_knowledge"
+            if not kdir.exists():
                 continue
-            for f in sorted(knowledge_dir.glob("*.md"), reverse=True)[:3]:
+            for f in sorted(kdir.glob("*.md"), reverse=True)[:3]:
                 try:
                     text = f.read_text(encoding="utf-8")
-                    label = f"{agent_dir.name}/{sub_dir.name}/{f.name}"
-                    context_parts.append(f"=== {label} ===\n{text[:4000]}")
+                    parts.append(f"=== {agent_dir.name}/{sub_dir.name}/{f.name} ===\n{text[:4000]}")
                 except Exception:
                     pass
-    for f in sorted(KNOWLEDGE_DIR.glob("*.md"))[:5]:
-        try:
-            context_parts.append(f"=== {f.name} ===\n{f.read_text(encoding='utf-8')[:3000]}")
-        except Exception:
-            pass
-    return "\n\n".join(context_parts)
+    return "\n\n".join(parts)
 
 
-def get_chat_history(brand_id: str, limit: int = 20) -> list:
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT role, content FROM messages WHERE brand_id = ? ORDER BY id DESC LIMIT ?",
-        (brand_id, limit)
-    ).fetchall()
-    conn.close()
-    return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+def build_system_prompt(agent_name: str) -> str:
+    base = SYSTEM_PROMPTS.get(agent_name, "Du er en hjælpsom AI-assistent. Svar på dansk.")
+    knowledge = get_knowledge(agent_name)
+    if knowledge:
+        return base + f"\n\nVidensbase (fra YouTube-transkripter):\n{knowledge}"
+    return base
 
 
-def save_message(brand_id: str, role: str, content: str):
-    conn = get_db()
-    conn.execute(
-        "INSERT INTO messages (brand_id, role, content) VALUES (?, ?, ?)",
-        (brand_id, role, content)
-    )
-    conn.commit()
-    conn.close()
+async def sse_stream(gen: AsyncGenerator) -> StreamingResponse:
+    return StreamingResponse(gen, media_type="text/event-stream; charset=utf-8",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-class ChatRequest(BaseModel):
-    brand_id: str
-    message: str
-    testing_mode: bool = False
-
-
-class UrlRequest(BaseModel):
-    url: str
-    brand_id: str = ""
-    title: str = ""
-
-
-async def stream_claude_response(brand_id: str, message: str, testing_mode: bool) -> AsyncGenerator[str, None]:
+async def stream_claude(messages: list, system: str = "") -> AsyncGenerator[str, None]:
+    if not client:
+        yield f"data: {json.dumps({'error': 'API key not set'})}\n\n"
+        return
     try:
-        if testing_mode:
-            system_prompt = "You are a helpful AI assistant in testing mode."
-            history = []
-        else:
-            brand_name = next((b["name"] for b in BRANDS if b["id"] == brand_id), brand_id)
-            knowledge = get_knowledge_context(brand_id)
-            system_prompt = f"""Du er Director — en intelligent AI-assistent for {brand_name}.
-Du hjælper med marketing, content, strategi og analyse baseret på din vidensbase.
-Du svarer altid på dansk med mindre andet anmodes.
-
-Vidensbase:\n{knowledge if knowledge else 'Ingen knowledge-filer fundet endnu.'}"""
-            history = get_chat_history(brand_id)
-        history.append({"role": "user", "content": message})
-        full_response = ""
-        with client.messages.stream(
-            model="claude-opus-4-7",
-            max_tokens=2048,
-            system=system_prompt,
-            messages=history,
-        ) as stream:
-            for text_chunk in stream.text_stream:
-                full_response += text_chunk
-                payload = json.dumps({"text": text_chunk}, ensure_ascii=False)
-                yield f"data: {payload}\n\n"
-        if not testing_mode:
-            save_message(brand_id, "user", message)
-            save_message(brand_id, "assistant", full_response)
+        kwargs = dict(model="claude-sonnet-4-6", max_tokens=2048, messages=messages)
+        if system:
+            kwargs["system"] = system
+        with client.messages.stream(**kwargs) as stream:
+            for chunk in stream.text_stream:
+                yield f"data: {json.dumps({'text': chunk}, ensure_ascii=False)}\n\n"
         yield "data: [DONE]\n\n"
     except Exception as e:
-        yield f"data: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
 
-@app.post("/chat")
-async def chat(request: ChatRequest):
-    return StreamingResponse(
-        stream_claude_response(request.brand_id, request.message, request.testing_mode),
-        media_type="text/event-stream; charset=utf-8",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-    )
+# ── Config ────────────────────────────────────────────────────────────────────
+@app.get("/api/config")
+def get_config():
+    return {"api_key_set": bool(API_KEY)}
 
 
-@app.get("/history/{brand_id}")
-async def get_history(brand_id: str):
-    return {"messages": get_chat_history(brand_id, limit=50)}
+# ── Brands ────────────────────────────────────────────────────────────────────
+@app.get("/api/brands")
+def list_brands():
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM brands ORDER BY id").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
-@app.delete("/history/{brand_id}")
-async def clear_history(brand_id: str):
-    conn = get_db()
-    conn.execute("DELETE FROM messages WHERE brand_id = ?", (brand_id,))
+@app.get("/api/brands/{brand_id}/agents")
+def list_agents(brand_id: int):
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM agents WHERE brand_id=? ORDER BY id", (brand_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.get("/api/brands/{brand_id}/stats")
+def brand_stats(brand_id: int):
+    conn = get_conn()
+    active_agents   = conn.execute("SELECT COUNT(*) FROM agents WHERE brand_id=? AND status!='idle'", (brand_id,)).fetchone()[0]
+    pending         = conn.execute("SELECT COUNT(*) FROM reports WHERE brand_id=? AND status='pending'", (brand_id,)).fetchone()[0]
+    active_tasks    = conn.execute("SELECT COUNT(*) FROM tasks WHERE brand_id=? AND status IN ('pending','in_progress')", (brand_id,)).fetchone()[0]
+    completed_tasks = conn.execute("SELECT COUNT(*) FROM tasks WHERE brand_id=? AND status='completed'", (brand_id,)).fetchone()[0]
+    conn.close()
+    return {"active_agents": active_agents, "pending_approvals": pending,
+            "active_tasks": active_tasks, "completed_tasks": completed_tasks}
+
+
+@app.get("/api/brands/{brand_id}/queue")
+def approval_queue(brand_id: int):
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT r.*, a.display_name as agent_display_name
+        FROM reports r JOIN agents a ON r.agent_id=a.id
+        WHERE r.brand_id=? AND r.status='pending'
+        ORDER BY r.created_at DESC
+    """, (brand_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ── Agents ────────────────────────────────────────────────────────────────────
+class StatusUpdate(BaseModel):
+    status: str
+
+
+@app.patch("/api/agents/{agent_id}")
+def update_agent_status(agent_id: int, body: StatusUpdate):
+    conn = get_conn()
+    conn.execute("UPDATE agents SET status=? WHERE id=?", (body.status, agent_id))
     conn.commit()
     conn.close()
-    return {"status": "cleared"}
+    return {"ok": True}
 
 
-@app.get("/brands")
-async def get_brands():
-    return {"brands": BRANDS}
+# ── Reports ───────────────────────────────────────────────────────────────────
+class ReportUpdate(BaseModel):
+    status: str
 
 
-@app.post("/urls")
-async def add_url(request: UrlRequest):
-    conn = get_db()
-    try:
-        conn.execute(
-            "INSERT OR IGNORE INTO youtube_urls (url, title, brand_id) VALUES (?, ?, ?)",
-            (request.url, request.title, request.brand_id)
-        )
-        conn.commit()
-        return {"status": "added"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-
-
-@app.get("/urls")
-async def list_urls():
-    conn = get_db()
-    rows = conn.execute("SELECT * FROM youtube_urls ORDER BY id DESC").fetchall()
+@app.patch("/api/reports/{report_id}")
+def update_report(report_id: int, body: ReportUpdate):
+    conn = get_conn()
+    conn.execute("UPDATE reports SET status=? WHERE id=?", (body.status, report_id))
+    conn.commit()
     conn.close()
-    return {"urls": [dict(r) for r in rows]}
+    return {"ok": True}
 
 
-@app.get("/knowledge")
-async def list_knowledge():
-    files = []
-    for f in sorted(KNOWLEDGE_DIR.rglob("*.md")):
-        if f.is_file():
-            files.append({
-                "name": f.name,
-                "path": str(f.relative_to(KNOWLEDGE_DIR)),
-                "size": f.stat().st_size,
-                "modified": datetime.fromtimestamp(f.stat().st_mtime).isoformat()
-            })
-    return {"files": files}
+# ── Messages ──────────────────────────────────────────────────────────────────
+@app.get("/api/brands/{brand_id}/agents/{agent_id}/messages")
+def get_messages(brand_id: int, agent_id: int):
+    conn = get_conn()
+    conv = conn.execute("SELECT id FROM conversations WHERE agent_id=?", (agent_id,)).fetchone()
+    if not conv:
+        conn.close()
+        return []
+    rows = conn.execute(
+        "SELECT role, content, created_at FROM messages WHERE conversation_id=? ORDER BY id",
+        (conv["id"],)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
-HTML = """
-<!DOCTYPE html>
-<html lang="da">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mallmedia Agent HQ</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: 'Segoe UI', system-ui, sans-serif; background: #0f0f13; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
-  header { background: #1a1a24; border-bottom: 1px solid #2a2a3a; padding: 14px 24px; display: flex; align-items: center; gap: 16px; }
-  header h1 { font-size: 1.1rem; font-weight: 600; color: #fff; letter-spacing: 0.05em; }
-  header .badge { background: #6c63ff22; color: #9d96ff; border: 1px solid #6c63ff44; padding: 3px 10px; border-radius: 20px; font-size: 0.75rem; }
-  .layout { display: flex; flex: 1; overflow: hidden; }
-  .sidebar { width: 220px; background: #13131c; border-right: 1px solid #2a2a3a; display: flex; flex-direction: column; padding: 16px 0; }
-  .sidebar-section { padding: 8px 16px 4px; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em; color: #555; }
-  .nav-item { padding: 9px 20px; cursor: pointer; font-size: 0.875rem; color: #888; display: flex; align-items: center; gap: 10px; transition: all 0.15s; }
-  .nav-item:hover { background: #1e1e2e; color: #ccc; }
-  .nav-item.active { background: #6c63ff22; color: #9d96ff; border-right: 2px solid #6c63ff; }
-  .nav-item .dot { width: 8px; height: 8px; border-radius: 50%; background: #6c63ff; }
-  .nav-item .dot.testing { background: #ff6b6b; }
-  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-  .tab-content { display: none; flex: 1; flex-direction: column; overflow: hidden; }
-  .tab-content.active { display: flex; }
-  .chat-messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
-  .message { max-width: 780px; }
-  .message.user { align-self: flex-end; }
-  .message.assistant { align-self: flex-start; }
-  .message-bubble { padding: 12px 16px; border-radius: 12px; line-height: 1.6; font-size: 0.9rem; white-space: pre-wrap; word-wrap: break-word; }
-  .user .message-bubble { background: #6c63ff; color: #fff; border-bottom-right-radius: 4px; }
-  .assistant .message-bubble { background: #1e1e2e; color: #e0e0e0; border-bottom-left-radius: 4px; border: 1px solid #2a2a3a; }
-  .message-meta { font-size: 0.7rem; color: #555; margin-top: 4px; padding: 0 4px; }
-  .user .message-meta { text-align: right; }
-  .chat-input-area { padding: 16px 24px; border-top: 1px solid #2a2a3a; background: #13131c; }
-  .chat-input-row { display: flex; gap: 10px; align-items: flex-end; }
-  .chat-input-row textarea { flex: 1; background: #1e1e2e; border: 1px solid #2a2a3a; color: #e0e0e0; padding: 12px 16px; border-radius: 10px; resize: none; font-family: inherit; font-size: 0.9rem; min-height: 48px; max-height: 160px; outline: none; transition: border-color 0.15s; }
-  .chat-input-row textarea:focus { border-color: #6c63ff; }
-  .send-btn { background: #6c63ff; color: #fff; border: none; padding: 12px 20px; border-radius: 10px; cursor: pointer; font-size: 0.9rem; font-weight: 600; transition: background 0.15s; white-space: nowrap; }
-  .send-btn:hover { background: #5a52e0; }
-  .send-btn:disabled { background: #333; color: #666; cursor: not-allowed; }
-  .panel { flex: 1; overflow-y: auto; padding: 24px; }
-  .panel h2 { font-size: 1rem; font-weight: 600; color: #fff; margin-bottom: 16px; }
-  .card { background: #1e1e2e; border: 1px solid #2a2a3a; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
-  .card h3 { font-size: 0.875rem; color: #ccc; margin-bottom: 8px; }
-  .card p { font-size: 0.8rem; color: #888; }
-  code { background: #13131c; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.8rem; }
-  input[type=url] { background: #1e1e2e; border: 1px solid #2a2a3a; color: #e0e0e0; padding: 10px 14px; border-radius: 8px; font-size: 0.875rem; width: 100%; outline: none; }
-  input[type=url]:focus { border-color: #6c63ff; }
-  .btn { background: #6c63ff; color: #fff; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; font-size: 0.875rem; font-weight: 600; }
-  .btn:hover { background: #5a52e0; }
-  .url-list { margin-top: 12px; }
-  .url-item, .file-item { background: #13131c; border: 1px solid #2a2a3a; border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; font-size: 0.8rem; }
-  .url-text, .file-name { color: #9d96ff; word-break: break-all; }
-  .url-meta, .file-meta { color: #555; font-size: 0.72rem; margin-top: 4px; }
-  .status-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; }
-  .status-pending { background: #ff990022; color: #ff9900; border: 1px solid #ff990044; }
-  .status-done { background: #00cc6622; color: #00cc66; border: 1px solid #00cc6644; }
-  .testing-banner { background: #c0392b; color: white; text-align: center; padding: 8px; font-size: 0.8rem; font-weight: 600; }
-  .clear-btn { background: none; border: 1px solid #2a2a3a; color: #666; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; }
-  .clear-btn:hover { border-color: #ff4444; color: #ff4444; }
-  .header-actions { margin-left: auto; }
-  .chat-header { padding: 12px 24px; border-bottom: 1px solid #2a2a3a; background: #13131c; display: flex; align-items: center; gap: 12px; }
-  .chat-header h2 { font-size: 0.95rem; color: #ccc; }
-  .typing-indicator { display: none; align-items: center; gap: 6px; padding: 8px 0; }
-  .typing-indicator.visible { display: flex; }
-  .typing-dot { width: 6px; height: 6px; border-radius: 50%; background: #6c63ff; animation: pulse 1.2s infinite; }
-  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
-  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes pulse { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
-  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: #2a2a3a; border-radius: 3px; }
-</style>
-</head>
-<body>
-<header>
-  <h1>&#9679; MALLMEDIA AGENT HQ</h1>
-  <span class="badge">Director v1.0</span>
-</header>
-<div class="layout">
-  <nav class="sidebar">
-    <div class="sidebar-section">Brands</div>
-    <div class="nav-item active" data-tab="chat-jens-christian-health" onclick="switchTab(this)">
-      <span class="dot"></span> Jens Christian Health
-    </div>
-    <div class="sidebar-section" style="margin-top:16px">Rum</div>
-    <div class="nav-item" data-tab="chat-testing" onclick="switchTab(this)">
-      <span class="dot testing"></span> Testing
-    </div>
-    <div class="sidebar-section" style="margin-top:16px">System</div>
-    <div class="nav-item" data-tab="knowledge" onclick="switchTab(this)">&#128218; Vidensbase</div>
-    <div class="nav-item" data-tab="urls" onclick="switchTab(this)">&#127909; YouTube URLs</div>
-  </nav>
-  <div class="main">
-    <div class="tab-content active" id="tab-chat-jens-christian-health">
-      <div class="chat-header">
-        <h2>Jens Christian Health &mdash; Director</h2>
-        <div class="header-actions"><button class="clear-btn" onclick="clearHistory('jens-christian-health')">Ryd chat</button></div>
-      </div>
-      <div class="chat-messages" id="messages-jens-christian-health"></div>
-      <div class="chat-input-area">
-        <div class="typing-indicator" id="typing-jens-christian-health">
-          <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
-          <span style="font-size:0.78rem;color:#555">Director skriver...</span>
-        </div>
-        <div class="chat-input-row">
-          <textarea id="input-jens-christian-health" placeholder="Skriv til Director..." rows="1" onkeydown="handleKey(event,'jens-christian-health')"></textarea>
-          <button class="send-btn" id="send-jens-christian-health" onclick="sendMessage('jens-christian-health')">Send</button>
-        </div>
-      </div>
-    </div>
-    <div class="tab-content" id="tab-chat-testing">
-      <div class="testing-banner">TESTING RUM &mdash; Ingen hukommelse &mdash; Ingen systemkontekst</div>
-      <div class="chat-header">
-        <h2>Testing Room</h2>
-        <div class="header-actions"><button class="clear-btn" onclick="clearMessages('testing')">Ryd visning</button></div>
-      </div>
-      <div class="chat-messages" id="messages-testing"></div>
-      <div class="chat-input-area">
-        <div class="typing-indicator" id="typing-testing">
-          <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
-          <span style="font-size:0.78rem;color:#555">Svarer...</span>
-        </div>
-        <div class="chat-input-row">
-          <textarea id="input-testing" placeholder="Test uden hukommelse..." rows="1" onkeydown="handleKey(event,'testing')"></textarea>
-          <button class="send-btn" id="send-testing" onclick="sendMessage('testing')">Send</button>
-        </div>
-      </div>
-    </div>
-    <div class="tab-content" id="tab-knowledge">
-      <div class="panel">
-        <h2>&#128218; Vidensbase</h2>
-        <div class="card">
-          <h3>Synkroniser fra Mac</h3>
-          <p style="margin-bottom:8px">K&#248;r <code>batch.py</code> p&#229; din Mac, derefter:</p>
-          <code style="display:block;padding:10px;margin-top:6px">rsync -avz -e "ssh -i ~/.ssh/id_ed25519" ~/Main\ Claude/ecom-agents/ root@187.124.17.73:/root/knowledge/</code>
-        </div>
-        <div id="knowledge-files"><div style="color:#555;font-size:0.8rem">Indl&#230;ser...</div></div>
-      </div>
-    </div>
-    <div class="tab-content" id="tab-urls">
-      <div class="panel">
-        <h2>&#127909; YouTube URLs</h2>
-        <div class="card">
-          <h3>Tilf&#248;j ny URL</h3>
-          <div style="display:flex;gap:10px;margin-top:8px">
-            <input type="url" id="new-url" placeholder="https://www.youtube.com/watch?v=..." />
-            <button class="btn" onclick="addUrl()">Tilf&#248;j</button>
-          </div>
-        </div>
-        <div id="url-list" class="url-list"></div>
-      </div>
-    </div>
-  </div>
-</div>
-<script>
-function switchTab(el) {
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
-  el.classList.add('active');
-  document.getElementById('tab-' + el.dataset.tab).classList.add('active');
-  if (el.dataset.tab === 'knowledge') loadKnowledge();
-  if (el.dataset.tab === 'urls') loadUrls();
-  if (el.dataset.tab.startsWith('chat-') && el.dataset.tab !== 'chat-testing') loadHistory(el.dataset.tab.replace('chat-', ''));
-}
-function escapeHtml(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function formatTime() { return new Date().toLocaleTimeString('da-DK',{hour:'2-digit',minute:'2-digit'}); }
-function appendMessage(brandId, role, content) {
-  const c = document.getElementById('messages-' + brandId);
-  const d = document.createElement('div');
-  d.className = 'message ' + role;
-  d.innerHTML = `<div class="message-bubble">${escapeHtml(content)}</div><div class="message-meta">${role==='user'?'Dig':'Director'} &bull; ${formatTime()}</div>`;
-  c.appendChild(d); c.scrollTop = c.scrollHeight; return d;
-}
-async function loadHistory(id) {
-  const d = await (await fetch('/history/'+id)).json();
-  const c = document.getElementById('messages-'+id); c.innerHTML='';
-  d.messages.forEach(m => appendMessage(id, m.role, m.content));
-}
-async function clearHistory(id) {
-  if(!confirm('Ryd chathistorik?')) return;
-  await fetch('/history/'+id,{method:'DELETE'});
-  document.getElementById('messages-'+id).innerHTML='';
-}
-function clearMessages(id) { document.getElementById('messages-'+id).innerHTML=''; }
-async function sendMessage(brandId) {
-  const input = document.getElementById('input-'+brandId);
-  const btn = document.getElementById('send-'+brandId);
-  const msg = input.value.trim(); if(!msg) return;
-  input.value=''; input.style.height='auto'; btn.disabled=true;
-  appendMessage(brandId,'user',msg);
-  const typing = document.getElementById('typing-'+brandId);
-  typing.classList.add('visible');
-  const c = document.getElementById('messages-'+brandId);
-  const ad = document.createElement('div'); ad.className='message assistant';
-  const bubble = document.createElement('div'); bubble.className='message-bubble';
-  const meta = document.createElement('div'); meta.className='message-meta'; meta.textContent='Director • '+formatTime();
-  ad.appendChild(bubble); ad.appendChild(meta); c.appendChild(ad);
-  try {
-    const res = await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({brand_id:brandId,message:msg,testing_mode:brandId==='testing'})});
-    typing.classList.remove('visible');
-    const reader = res.body.getReader(); const dec = new TextDecoder('utf-8');
-    let buf='',full='';
-    while(true) {
-      const {done,value}=await reader.read(); if(done) break;
-      buf+=dec.decode(value,{stream:true});
-      const lines=buf.split('\n'); buf=lines.pop();
-      for(const line of lines) {
-        if(!line.startsWith('data: ')) continue;
-        const p=line.slice(6); if(p==='[DONE]') break;
-        try { const j=JSON.parse(p); if(j.text){full+=j.text;bubble.textContent=full;c.scrollTop=c.scrollHeight;} } catch(e){}
-      }
-    }
-  } catch(e) { bubble.textContent='Fejl: '+e.message; typing.classList.remove('visible'); }
-  btn.disabled=false; input.focus();
-}
-function handleKey(e,id) {
-  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(id);}
-  e.target.style.height='auto'; e.target.style.height=Math.min(e.target.scrollHeight,160)+'px';
-}
-async function addUrl() {
-  const i=document.getElementById('new-url'); const url=i.value.trim(); if(!url) return;
-  await fetch('/urls',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
-  i.value=''; loadUrls();
-}
-async function loadUrls() {
-  const d=await(await fetch('/urls')).json();
-  const l=document.getElementById('url-list');
-  l.innerHTML=d.urls.length?d.urls.map(u=>`<div class="url-item"><div class="url-text">${escapeHtml(u.url)}</div><div class="url-meta">${u.title||'Ingen titel'} &bull; <span class="status-badge status-${u.status}">${u.status}</span></div></div>`).join(''):'<div style="color:#555;font-size:0.8rem">Ingen URLs endnu.</div>';
-}
-async function loadKnowledge() {
-  const d=await(await fetch('/knowledge')).json();
-  const l=document.getElementById('knowledge-files');
-  l.innerHTML=d.files.length?d.files.map(f=>`<div class="file-item"><div class="file-name">${escapeHtml(f.name)}</div><div class="file-meta">${escapeHtml(f.path)} &bull; ${(f.size/1024).toFixed(1)} KB</div></div>`).join(''):'<div style="color:#555;font-size:0.8rem">Ingen filer. Sync fra Mac først.</div>';
-}
-loadHistory('jens-christian-health'); loadKnowledge();
-</script>
-</body>
-</html>
-"""
+@app.delete("/api/brands/{brand_id}/agents/{agent_id}/messages")
+def clear_messages(brand_id: int, agent_id: int):
+    conn = get_conn()
+    conv = conn.execute("SELECT id FROM conversations WHERE agent_id=?", (agent_id,)).fetchone()
+    if conv:
+        conn.execute("DELETE FROM messages WHERE conversation_id=?", (conv["id"],))
+        conn.execute("DELETE FROM conversations WHERE id=?", (conv["id"],))
+        conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ── Chat ──────────────────────────────────────────────────────────────────────
+class AgentChatRequest(BaseModel):
+    message: str
+
+
+class TestChatRequest(BaseModel):
+    messages: list
+
+
+@app.post("/api/brands/{brand_id}/agents/{agent_id}/chat")
+async def agent_chat(brand_id: int, agent_id: int, body: AgentChatRequest):
+    conn = get_conn()
+    agent = conn.execute("SELECT * FROM agents WHERE id=?", (agent_id,)).fetchone()
+    if not agent:
+        conn.close()
+        raise HTTPException(404, "Agent not found")
+
+    from datetime import datetime
+    now = datetime.utcnow().isoformat()
+
+    conv = conn.execute("SELECT id FROM conversations WHERE agent_id=?", (agent_id,)).fetchone()
+    if not conv:
+        conn.execute("INSERT INTO conversations (agent_id, brand_id, created_at) VALUES (?,?,?)",
+                     (agent_id, brand_id, now))
+        conn.commit()
+        conv = conn.execute("SELECT id FROM conversations WHERE agent_id=?", (agent_id,)).fetchone()
+
+    conv_id = conv["id"]
+    history = conn.execute(
+        "SELECT role, content FROM messages WHERE conversation_id=? ORDER BY id",
+        (conv_id,)
+    ).fetchall()
+
+    messages = [dict(r) for r in history]
+    messages.append({"role": "user", "content": body.message})
+
+    conn.execute("INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?,?,?,?)",
+                 (conv_id, "user", body.message, now))
+    conn.commit()
+    conn.close()
+
+    system = build_system_prompt(agent["name"])
+    accumulated = []
+
+    async def gen():
+        async for chunk in stream_claude(messages, system):
+            if chunk.startswith("data: ") and chunk.strip() != "data: [DONE]":
+                try:
+                    obj = json.loads(chunk[6:])
+                    if obj.get("text"):
+                        accumulated.append(obj["text"])
+                except Exception:
+                    pass
+            yield chunk
+        if accumulated:
+            full = "".join(accumulated)
+            c = get_conn()
+            c.execute("INSERT INTO messages (conversation_id, role, content, created_at) VALUES (?,?,?,?)",
+                      (conv_id, "assistant", full, now))
+            c.commit()
+            c.close()
+
+    return await sse_stream(gen())
+
+
+@app.post("/api/chat/test")
+async def test_chat(body: TestChatRequest):
+    return await sse_stream(stream_claude(body.messages))
+
+
+# ── Knowledge / YouTube Queue ─────────────────────────────────────────────────
+class QueueItem(BaseModel):
+    url: str
+    speaker: str
+
+
+@app.get("/api/knowledge/queue")
+def get_queue():
+    conn = get_conn()
+    rows = conn.execute("SELECT * FROM youtube_queue ORDER BY added_at DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/knowledge/queue")
+def add_to_queue(item: QueueItem):
+    from datetime import datetime
+    conn = get_conn()
+    conn.execute(
+        "INSERT INTO youtube_queue (url, speaker, status, added_at) VALUES (?,?,?,?)",
+        (item.url, item.speaker, "pending", datetime.utcnow().isoformat())
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.delete("/api/knowledge/queue/{item_id}")
+def delete_queue_item(item_id: int):
+    conn = get_conn()
+    conn.execute("DELETE FROM youtube_queue WHERE id=?", (item_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/knowledge/queue/{item_id}/retry")
+def retry_queue_item(item_id: int):
+    conn = get_conn()
+    conn.execute("UPDATE youtube_queue SET status='pending', error_msg=NULL WHERE id=?", (item_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/knowledge/status")
+def knowledge_status():
+    conn = get_conn()
+    rows = conn.execute("SELECT status, COUNT(*) as n FROM youtube_queue GROUP BY status").fetchall()
+    conn.close()
+    counts = {r["status"]: r["n"] for r in rows}
+    return {"counts": counts, "running": False}
+
+
+_log_queue: asyncio.Queue = asyncio.Queue()
+_processing = False
+
+
+@app.post("/api/knowledge/process")
+async def start_processing():
+    global _processing
+    if _processing:
+        return {"ok": False, "message": "Already running"}
+    _processing = True
+    asyncio.create_task(run_processor())
+    return {"ok": True}
+
+
+async def run_processor():
+    global _processing
+    conn = get_conn()
+    pending = conn.execute("SELECT * FROM youtube_queue WHERE status='pending'").fetchall()
+    conn.close()
+
+    for row in pending:
+        await _log_queue.put({"line": f"=== [{row['speaker']}] {row['url']} ==="})
+        conn = get_conn()
+        conn.execute("UPDATE youtube_queue SET status='processing' WHERE id=?", (row["id"],))
+        conn.commit()
+        conn.close()
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "python3", "/root/processor/process.py", row["speaker"], row["url"],
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            )
+            lines = []
+            async for line in proc.stdout:
+                text = line.decode("utf-8", errors="replace").rstrip()
+                lines.append(text)
+                await _log_queue.put({"line": text})
+            await proc.wait()
+            from datetime import datetime
+            conn = get_conn()
+            if proc.returncode == 0:
+                conn.execute("UPDATE youtube_queue SET status='done', processed_at=? WHERE id=?",
+                             (datetime.utcnow().isoformat(), row["id"]))
+                await _log_queue.put({"line": f"  ✓ Done"})
+            else:
+                err = "\n".join(lines[-3:])
+                conn.execute("UPDATE youtube_queue SET status='error', error_msg=? WHERE id=?",
+                             (err[:500], row["id"]))
+                await _log_queue.put({"line": f"  ✗ Error"})
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            conn = get_conn()
+            conn.execute("UPDATE youtube_queue SET status='error', error_msg=? WHERE id=?",
+                         (str(e)[:500], row["id"]))
+            conn.commit()
+            conn.close()
+            await _log_queue.put({"line": f"  ✗ {e}"})
+
+    await _log_queue.put({"done": True})
+    _processing = False
+
+
+@app.get("/api/knowledge/log")
+async def knowledge_log():
+    async def gen():
+        while True:
+            try:
+                item = await asyncio.wait_for(_log_queue.get(), timeout=30)
+                yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
+                if item.get("done"):
+                    break
+            except asyncio.TimeoutError:
+                yield "data: {\"ping\": true}\n\n"
+    return StreamingResponse(gen(), media_type="text/event-stream; charset=utf-8",
+                             headers={"Cache-Control": "no-cache"})
+
+
+# ── Static files + index ──────────────────────────────────────────────────────
+app.mount("/static", StaticFiles(directory="/root/agent-hq/static"), name="static")
 
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
-    return HTMLResponse(content=HTML, media_type="text/html; charset=utf-8")
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+def index():
+    return (Path("/root/agent-hq/static/index.html")).read_text(encoding="utf-8")
