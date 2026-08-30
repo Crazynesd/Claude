@@ -1,0 +1,731 @@
+<title>Qleer USP-brættet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+
+<style>
+  :root{
+    --ground:#F6F8F8;
+    --surface:#FFFFFF;
+    --surface-2:#EBF0F1;
+    --ink:#16232A;
+    --ink-2:#4A5C66;
+    --ink-3:#788B94;
+    --rule:#D6DEE1;
+    --rule-strong:#B2C0C6;
+    --accent:#3C5461;
+    --proof:#0C6B72;
+    --proof-bg:#E2F0F0;
+    --gap:#9C560F;
+    --gap-bg:#F6EBDF;
+    --shadow:0 1px 2px rgba(22,35,42,.05), 0 8px 24px -16px rgba(22,35,42,.22);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --ground:#0E181D;
+      --surface:#152329;
+      --surface-2:#1C2E35;
+      --ink:#E7EEF0;
+      --ink-2:#A9BAC1;
+      --ink-3:#7C8F97;
+      --rule:#273E47;
+      --rule-strong:#3B565F;
+      --accent:#9DBFCD;
+      --proof:#4EB6BC;
+      --proof-bg:#143435;
+      --gap:#DB9A55;
+      --gap-bg:#33261A;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -16px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0E181D;
+    --surface:#152329;
+    --surface-2:#1C2E35;
+    --ink:#E7EEF0;
+    --ink-2:#A9BAC1;
+    --ink-3:#7C8F97;
+    --rule:#273E47;
+    --rule-strong:#3B565F;
+    --accent:#9DBFCD;
+    --proof:#4EB6BC;
+    --proof-bg:#143435;
+    --gap:#DB9A55;
+    --gap-bg:#33261A;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -16px rgba(0,0,0,.6);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    background:var(--ground);
+    color:var(--ink);
+    font-family:"IBM Plex Sans","Segoe UI",Helvetica,Arial,sans-serif;
+    font-size:16px;
+    line-height:1.62;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page{
+    max-width:52rem;
+    margin:0 auto;
+    padding:clamp(1.5rem,4vw,4rem) clamp(1.1rem,4vw,2.5rem) 5rem;
+    display:flex;
+    flex-direction:column;
+    gap:clamp(2.5rem,5vw,3.75rem);
+  }
+
+  /* ---------- masthead ---------- */
+  .masthead{display:flex;flex-direction:column;gap:1.15rem;}
+  .eyebrow{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.72rem;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--ink-3);
+  }
+  h1{
+    font-family:Newsreader,Georgia,"Times New Roman",serif;
+    font-weight:500;
+    font-size:clamp(2.25rem,6vw,3.4rem);
+    line-height:1.05;
+    letter-spacing:-.015em;
+    margin:0;
+    text-wrap:balance;
+  }
+  .deck{
+    font-family:Newsreader,Georgia,serif;
+    font-size:clamp(1.1rem,2.4vw,1.35rem);
+    line-height:1.5;
+    color:var(--ink-2);
+    margin:0;
+    max-width:38ch;
+    text-wrap:balance;
+  }
+  .masthead-meta{
+    display:flex;
+    flex-wrap:wrap;
+    gap:.4rem 1.5rem;
+    padding-top:1.15rem;
+    border-top:1px solid var(--rule);
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.73rem;
+    color:var(--ink-3);
+    letter-spacing:.02em;
+  }
+
+  /* ---------- generic blocks ---------- */
+  .note{
+    background:var(--surface);
+    border:1px solid var(--rule);
+    border-left:3px solid var(--accent);
+    padding:1.15rem 1.35rem;
+    display:flex;
+    flex-direction:column;
+    gap:.7rem;
+  }
+  .note p{margin:0;font-size:.94rem;color:var(--ink-2);}
+  .note strong{color:var(--ink);font-weight:600;}
+  .note .label{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.7rem;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--accent);
+  }
+
+  h2.section-title{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.75rem;
+    font-weight:500;
+    letter-spacing:.16em;
+    text-transform:uppercase;
+    color:var(--ink-3);
+    margin:0 0 1.15rem;
+    padding-bottom:.55rem;
+    border-bottom:1px solid var(--rule-strong);
+  }
+
+  /* ---------- primer ---------- */
+  .primer{display:grid;gap:1.25rem;grid-template-columns:1fr;}
+  @media (min-width:44rem){.primer{grid-template-columns:1fr 1fr;}}
+  .card{
+    background:var(--surface);
+    border:1px solid var(--rule);
+    padding:1.25rem 1.35rem 1.4rem;
+    display:flex;
+    flex-direction:column;
+    gap:.9rem;
+    box-shadow:var(--shadow);
+  }
+  .card h3{
+    font-family:Newsreader,Georgia,serif;
+    font-size:1.3rem;
+    font-weight:500;
+    margin:0;
+    letter-spacing:-.01em;
+  }
+  .card p.card-sub{margin:0;font-size:.87rem;color:var(--ink-3);}
+  .ladder{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;}
+  .ladder li{
+    display:grid;
+    grid-template-columns:1.5rem 1fr;
+    gap:.7rem;
+    padding:.5rem 0;
+    border-top:1px solid var(--rule);
+    font-size:.88rem;
+    line-height:1.45;
+    color:var(--ink-2);
+  }
+  .ladder li .n{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.78rem;
+    color:var(--ink-3);
+    padding-top:.1rem;
+  }
+  .ladder li.here{color:var(--ink);}
+  .ladder li.here .n{color:var(--accent);font-weight:500;}
+  .ladder b{font-weight:600;color:var(--ink);}
+  .here-tag{
+    display:inline-block;
+    margin-left:.35rem;
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.66rem;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    padding:.05rem .38rem;
+    border:1px solid currentColor;
+    vertical-align:1px;
+  }
+  .t-faucet{color:var(--proof);}
+  .t-shower{color:var(--gap);}
+
+  /* ---------- topics ---------- */
+  .topics{display:flex;flex-direction:column;gap:clamp(2rem,4vw,2.75rem);}
+  .topic{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:1rem;
+    padding-top:1.4rem;
+    border-top:2px solid var(--ink);
+  }
+  @media (min-width:48rem){
+    .topic{grid-template-columns:3.25rem 1fr;gap:0 1.75rem;}
+    .topic-num{grid-row:1 / span 2;}
+  }
+  .topic-num{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.95rem;
+    font-weight:500;
+    color:var(--accent);
+    letter-spacing:.04em;
+    padding-top:.35rem;
+  }
+  .topic-body{display:flex;flex-direction:column;gap:1.05rem;}
+  .topic h3{
+    font-family:Newsreader,Georgia,serif;
+    font-size:clamp(1.5rem,3.4vw,1.95rem);
+    font-weight:500;
+    line-height:1.18;
+    letter-spacing:-.015em;
+    margin:0;
+    text-wrap:balance;
+  }
+  .topic p{margin:0;max-width:66ch;}
+  .topic p.lede{font-size:1.02rem;color:var(--ink-2);}
+
+  .block{display:flex;flex-direction:column;gap:.5rem;}
+  .block-label{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.68rem;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--ink-3);
+  }
+  .facts{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.45rem;}
+  .facts li{
+    position:relative;
+    padding-left:1.1rem;
+    font-size:.94rem;
+    color:var(--ink-2);
+    max-width:66ch;
+  }
+  .facts li::before{
+    content:"";
+    position:absolute;
+    left:0;top:.66em;
+    width:.4rem;height:1px;
+    background:var(--rule-strong);
+  }
+  .facts b{color:var(--ink);font-weight:600;}
+
+  .rec{
+    background:var(--surface);
+    border:1px solid var(--rule);
+    padding:1rem 1.2rem;
+    display:flex;
+    flex-direction:column;
+    gap:.45rem;
+  }
+  .rec .block-label{color:var(--accent);}
+  .rec p{font-size:.96rem;}
+
+  .decision{
+    display:flex;
+    flex-direction:column;
+    gap:.35rem;
+    padding:.85rem 1.2rem;
+    background:var(--surface-2);
+    border-left:3px solid var(--rule-strong);
+  }
+  .decision .block-label{color:var(--ink-2);}
+  .decision p{
+    font-family:Newsreader,Georgia,serif;
+    font-size:1.08rem;
+    font-style:italic;
+    color:var(--ink);
+  }
+
+  /* ---------- awareness table ---------- */
+  .table-wrap{overflow-x:auto;border:1px solid var(--rule);background:var(--surface);}
+  table{border-collapse:collapse;width:100%;min-width:38rem;font-size:.88rem;}
+  th,td{text-align:left;padding:.68rem .85rem;vertical-align:top;border-bottom:1px solid var(--rule);}
+  thead th{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.68rem;
+    font-weight:500;
+    letter-spacing:.11em;
+    text-transform:uppercase;
+    color:var(--ink-3);
+    background:var(--surface-2);
+    border-bottom:1px solid var(--rule-strong);
+    white-space:nowrap;
+  }
+  tbody tr:last-child td{border-bottom:none;}
+  td.step{
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.78rem;
+    color:var(--accent);
+    white-space:nowrap;
+  }
+  td b{font-weight:600;}
+  td.never{color:var(--gap);}
+
+  /* ---------- claims ledger ---------- */
+  .ledger{display:grid;gap:1.25rem;grid-template-columns:1fr;}
+  @media (min-width:48rem){.ledger{grid-template-columns:1fr 1fr;}}
+  .sheet{
+    background:var(--surface);
+    border:1px solid var(--rule-strong);
+    display:flex;
+    flex-direction:column;
+  }
+  .sheet-head{
+    padding:.95rem 1.15rem;
+    border-bottom:1px solid var(--rule-strong);
+    display:flex;
+    flex-direction:column;
+    gap:.3rem;
+  }
+  .sheet-head h3{
+    font-family:Newsreader,Georgia,serif;
+    font-size:1.35rem;
+    font-weight:500;
+    margin:0;
+    letter-spacing:-.01em;
+  }
+  .status{
+    display:inline-flex;
+    align-items:center;
+    gap:.4rem;
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.68rem;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    width:fit-content;
+    padding:.15rem .45rem;
+  }
+  .status.doc{color:var(--proof);background:var(--proof-bg);}
+  .status.undoc{color:var(--gap);background:var(--gap-bg);}
+  .dot{width:.45rem;height:.45rem;border-radius:50%;background:currentColor;flex:none;}
+  .dot.hollow{background:transparent;border:1px solid currentColor;}
+  .sheet-col{padding:.95rem 1.15rem 1.15rem;border-bottom:1px solid var(--rule);}
+  .sheet-col:last-child{border-bottom:none;}
+  .sheet-col .block-label{margin-bottom:.55rem;display:block;}
+  .sheet-col.yes .block-label{color:var(--proof);}
+  .sheet-col.no .block-label{color:var(--gap);}
+  .spec{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:.4rem;}
+  .spec li{
+    font-size:.86rem;
+    line-height:1.45;
+    color:var(--ink-2);
+    padding-left:1rem;
+    position:relative;
+  }
+  .spec li::before{
+    position:absolute;left:0;top:0;
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.8rem;
+  }
+  .sheet-col.yes .spec li::before{content:"+";color:var(--proof);}
+  .sheet-col.no .spec li::before{content:"\2013";color:var(--gap);}
+  .spec b{color:var(--ink);font-weight:600;}
+  .num{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums;font-size:.84em;}
+
+  .both{
+    border:1px solid var(--rule);
+    background:var(--surface-2);
+    padding:1rem 1.2rem;
+    display:flex;
+    flex-direction:column;
+    gap:.55rem;
+  }
+  .both ul{margin:0;padding-left:1.1rem;display:flex;flex-direction:column;gap:.3rem;}
+  .both li{font-size:.88rem;color:var(--ink-2);}
+
+  /* ---------- close ---------- */
+  .close{
+    border-top:2px solid var(--ink);
+    padding-top:1.5rem;
+    display:flex;
+    flex-direction:column;
+    gap:.9rem;
+  }
+  .close blockquote{
+    margin:0;
+    font-family:Newsreader,Georgia,serif;
+    font-size:clamp(1.35rem,3.2vw,1.75rem);
+    line-height:1.32;
+    letter-spacing:-.01em;
+    max-width:32ch;
+    text-wrap:balance;
+  }
+  footer{
+    border-top:1px solid var(--rule);
+    padding-top:1.1rem;
+    font-family:"IBM Plex Mono",ui-monospace,monospace;
+    font-size:.72rem;
+    line-height:1.7;
+    color:var(--ink-3);
+  }
+  a{color:var(--accent);}
+  a:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;}}
+</style>
+
+<div class="page">
+
+  <header class="masthead">
+    <div class="eyebrow">Qleer · Copy-strategi · 30. august 2026</div>
+    <h1>USP-brættet:<br>hane og bruser</h1>
+    <p class="deck">Fem beslutninger om sofistikeringsniveau, bevidsthedstrin og hvad vi rent faktisk må sige — så copy peger samme vej på begge produkter.</p>
+    <div class="masthead-meta">
+      <span>Til: Isaac + Christian</span>
+      <span>Ramme: Schwartz, Breakthrough Advertising</span>
+      <span>Kilder: Sandhedsbasen · 06 Filterspecifikation 28/8 · Marketingplanen 30/7 · Ads &amp; salgsvinkler 26/8</span>
+    </div>
+  </header>
+
+  <section class="note">
+    <span class="label">Læs først — to ting står åbne</span>
+    <p><strong>ICP'en er formelt ikke afgjort.</strong> Marketingplanen foreslår mor i husstanden, 30–45, egen bolig, abonnerer allerede på noget — og har ventet på Isaacs ja siden 26/7. Alt herunder antager den. Flipper den, er det punkt 4 der ændrer sig mest.</p>
+    <p><strong>YouTube-transskriptet kom ikke med i tråden.</strong> Send det, så lægger jeg dets vinkler ind i punkt 3 og 5, hvor de hører til. Alt herunder står på jeres eget materiale og holder uanset.</p>
+  </section>
+
+  <section>
+    <h2 class="section-title">Grundpladen — de to akser på 60 sekunder</h2>
+    <div class="primer">
+
+      <div class="card">
+        <h3>Sofistikering</h3>
+        <p class="card-sub">Hvor træt er <em>markedet</em> af at høre påstanden? Bestemmer <b>hvad</b> vi siger.</p>
+        <ul class="ladder">
+          <li><span class="n">1</span><span><b>Først.</b> Sig påstanden rent. »Rent vand.«</span></li>
+          <li><span class="n">2</span><span><b>Forstørret.</b> Samme påstand, større tal. »99,9 %.«</span></li>
+          <li class="here"><span class="n">3</span><span><b>Mekanisme.</b> Påstanden er slidt — vis <em>hvordan</em>. <span class="here-tag t-faucet">Hanen står her</span></span></li>
+          <li><span class="n">4</span><span><b>Mekanismen udbygget.</b> Flere lag, flere standarder, nemmere montering.</span></li>
+          <li class="here"><span class="n">5</span><span><b>Identitet.</b> Markedet tror ikke på et eneste tal mere. Du sælger, hvem hun er. <span class="here-tag t-shower">Bruseren står her</span></span></li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>Bevidsthed</h3>
+        <p class="card-sub">Hvor meget ved <em>hun</em> allerede? Bestemmer <b>hvor</b> vi siger det.</p>
+        <ul class="ladder">
+          <li><span class="n">1</span><span><b>Uvidende.</b> Kender ikke problemet. <span class="here-tag t-shower">De 36 %</span></span></li>
+          <li class="here"><span class="n">2</span><span><b>Problembevidst.</b> Ved vandet er et problem. <span class="here-tag t-faucet">Annoncen</span></span></li>
+          <li class="here"><span class="n">3</span><span><b>Løsningsbevidst.</b> Ved der findes filtre. <span class="here-tag t-faucet">Rapportsiden</span></span></li>
+          <li class="here"><span class="n">4</span><span><b>Produktbevidst.</b> Kender Qleer, ikke overbevist. <span class="here-tag t-faucet">Produktsiden</span></span></li>
+          <li class="here"><span class="n">5</span><span><b>Fuldt bevidst.</b> Mangler kun en grund til i dag. <span class="here-tag t-faucet">Tilbud</span></span></li>
+        </ul>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="topics">
+    <h2 class="section-title">De fem punkter</h2>
+
+    <!-- 1 -->
+    <article class="topic">
+      <div class="topic-num">01</div>
+      <div class="topic-body">
+        <h3>Hane og bruser står ikke på samme sofistikeringsniveau</h3>
+        <p class="lede">Det er den vigtigste tekniske forskel mellem de to produkter, og den handler ikke om filtrering. Den handler om, hvor meget dokumentation vi har i hånden.</p>
+
+        <div class="block">
+          <span class="block-label">Hvad der ligger på bordet</span>
+          <ul class="facts">
+            <li><b>Hanen har en dokumenteret mekanisme.</b> Carbon block med PFAS Remover. <span class="num">95 %</span> PFOA og PFOS, <span class="num">99 %</span> klor, <span class="num">1.200</span> liter, testet efter NSF/ANSI 42 og 53, SGS-rapport i mappen.</li>
+            <li><b>Ingen har kørt et dokumenteret PFAS-tal i en dansk annonce.</b> Kategorien herhjemme er kande-filtre og »bedre smag« — niveau 2. Mekanismen er stadig frisk her. Det er sjældent og det er værd penge.</li>
+            <li><b>Bruseren har nul.</b> Aminosyre-kalkhæmmer plus KDF plus kulfiber. Ingen procenter, intet laboratorium, ingen teststandard, intet model-ID, ingen levetid i liter. Kortet er et materialekort, ikke en testrapport.</li>
+            <li><b>Og brusekategorien er allerede kørt træt globalt.</b> De udenlandske brands sælger på 15 lag og C-vitamin — niveau 4 til 5. Vi kan ikke matche den påstandskrig, og vi skal ikke prøve.</li>
+          </ul>
+        </div>
+
+        <div class="rec">
+          <span class="block-label">Min anbefaling</span>
+          <p>To copy-motorer, ikke én. <b>Hanen sælges på mekanisme og bevis.</b> <b>Bruseren sælges på identitet og ritual</b> — og på mekanismen beskrevet ærligt uden et eneste tal. Samme brand, samme tone, to helt forskellige argumenter. Det ene tal må aldrig gå på tværs.</p>
+        </div>
+
+        <div class="decision">
+          <span class="block-label">Beslutning</span>
+          <p>Accepterer vi to adskilte copy-spor — og får bruseren sin egen kreative linje og sin egen landingsside?</p>
+        </div>
+      </div>
+    </article>
+
+    <!-- 2 -->
+    <article class="topic">
+      <div class="topic-num">02</div>
+      <div class="topic-body">
+        <h3>Vores trafik er varmere, end vores copy antager</h3>
+        <p class="lede">99 ud af 100, der lander på produktsiden, har allerede taget postnummer-quizzen og set statens tal for deres egen adresse. Vi skriver stadig, som om de kommer koldt ind.</p>
+
+        <div class="block">
+          <span class="block-label">Trappen, sådan som den faktisk ser ud</span>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr><th>Trin</th><th>Hvor hun er</th><th>Sidens eneste job</th><th>Må aldrig</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="step">2 · Annoncen</td>
+                  <td>Problembevidst. DR, TV2 og Korsør har undervist hende gratis i årevis.</td>
+                  <td><b>Genkendelse plus ét klik.</b> Et spejl, ikke en oplysning.</td>
+                  <td class="never">Undervise. Ingen »vidste du«, ingen »PFAS er…« i de første tre sekunder.</td>
+                </tr>
+                <tr>
+                  <td class="step">3 · Rapportsiden</td>
+                  <td>Løsningsbevidst i det sekund, hun ser sit eget postnummer.</td>
+                  <td><b>Introducér mekanismen.</b> Her hører »vandværket renser ikke for PFAS« hjemme.</td>
+                  <td class="never">Sælge hardware, før hun har set sit tal.</td>
+                </tr>
+                <tr>
+                  <td class="step">4 · Produktsiden</td>
+                  <td>Produktbevidst. Hun kommer direkte fra sin egen rapport.</td>
+                  <td><b>To ting:</b> koblingen til hud og hår, som rapporten aldrig gav hende — og hvorfor netop vores filter.</td>
+                  <td class="never">Gentage problemet. »Derfor findes vi« vinder en kamp, der allerede er vundet, på sidens bedste plads.</td>
+                </tr>
+                <tr>
+                  <td class="step">5 · Tilbuddet</td>
+                  <td>Fuldt bevidst. Mangler kun en grund til at gøre det i dag.</td>
+                  <td><b>Husstanden, abonnementet, 30 dages retur med betalt returfragt, ingen binding.</b></td>
+                  <td class="never">Falsk knaphed, fake førpriser, opfundne tal.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="rec">
+          <span class="block-label">Min anbefaling</span>
+          <p>Ét job pr. trin, og intet trin gentager det forrige. Konkret: <b>»Derfor findes vi« ud af produktsiden</b> og op på rapportsiden, hvor den hører til. Produktsiden åbner i stedet med at anerkende, hvor hun kommer fra — Schwartz' gradualization: start ved det, hun allerede har accepteret.</p>
+        </div>
+
+        <div class="decision">
+          <span class="block-label">Beslutning</span>
+          <p>Skærer vi problem-argumentationen af produktsiden og flytter mekanismen op på rapportsiden?</p>
+        </div>
+      </div>
+    </article>
+
+    <!-- 3 -->
+    <article class="topic">
+      <div class="topic-num">03</div>
+      <div class="topic-body">
+        <h3>Mekanismen skal have et navn</h3>
+        <p class="lede">På niveau 3 er mekanismen selve løftet. En mekanisme uden navn er en specifikation, som konkurrenten kan kopiere i næste uge. En mekanisme med navn er et aktiv, vi ejer.</p>
+
+        <div class="block">
+          <span class="block-label">Hvad der ligger på bordet</span>
+          <ul class="facts">
+            <li><b>Hanen har alt, der skal til.</b> Kulfiberblok plus PFAS Remover, <span class="num">42 × 90</span> mm, <span class="num">1.200</span> liter, <span class="num">2</span> liter i minuttet, fødevaregodkendt ABS, NSF/ANSI 42 og 53. Det er en mekanisme-historie, ikke en featureliste — vi fortæller den bare ikke som én.</li>
+            <li><b>Bruseren har tre lag og ingen tal.</b> KDF tager tungmetaller, tolværdigt jern og svovlbrinte. Aminosyre-laget binder calcium og magnesium, så kalken ikke aflejrer. Kulfiber er slet ikke beskrevet af leverandøren.</li>
+            <li><b>Kategorien er fuld af 99,9 %.</b> Alle siger et tal. Ingen siger, hvor tallet kommer fra.</li>
+          </ul>
+        </div>
+
+        <div class="rec">
+          <span class="block-label">Min anbefaling</span>
+          <p>Navngiv begge mekanismer, og lad bruserens manglende dokumentation blive brandets stærkeste bevis: <b>»Vi skriver ikke et tal, vi ikke har målt.«</b> Så står bruserens tomme datablad ikke længere som en svaghed, vi skal skjule — det bliver demonstrationen af, hvorfor hanens <span class="num">95 %</span> er til at stole på. Det ligger oven på validitetsbanken, »ingen fake udsalg« og »ingen opfundne tal«, det koster nul kroner, og det er den eneste påstand i kategorien, konkurrenten ikke kan kopiere uden at rydde op i sit eget hus først.</p>
+        </div>
+
+        <div class="decision">
+          <span class="block-label">Beslutning</span>
+          <p>Godkender vi to mekanisme-navne — ét pr. produkt — og ærlighedslinjen som fast copy på bruseren?</p>
+        </div>
+      </div>
+    </article>
+
+    <!-- 4 -->
+    <article class="topic">
+      <div class="topic-num">04</div>
+      <div class="topic-body">
+        <h3>De 36 %, der får at vide, at deres vand er fint</h3>
+        <p class="lede">Over en tredjedel af trafikken igennem quizzen får et svar, der lukker frygt-funnelen. Vi har lige nu intet at sige til dem.</p>
+
+        <div class="block">
+          <span class="block-label">Hvad der ligger på bordet</span>
+          <ul class="facts">
+            <li><span class="num">23,8 %</span> af postnumrene har ikke påvist PFAS. Yderligere <span class="num">12,9 %</span> ligger under kravværdien. <b>Tilsammen over en tredjedel.</b></li>
+            <li><b>Et frygtdrevet produkt kan ikke sælge til dem.</b> Rapportsiden er endestationen. Et identitetsdrevet kan.</li>
+            <li><b>Annonceregel #2 siger badeværelset før køkkenet.</b> Produktet skal kunne ses. En hane under en køkkenvask kommer aldrig med på et billede; et brusehoved gør.</li>
+            <li><b>Og der er fælden:</b> det synlige produkt er præcis det, vi må sige mindst om. Hanen har beviset og er usynlig. Bruseren er synlig og har intet bevis.</li>
+          </ul>
+        </div>
+
+        <div class="rec">
+          <span class="block-label">Min anbefaling</span>
+          <p>Det er ikke en fejl, det er kampagne nummer to. <b>Bruseren er kroget, hanen er beviset.</b> Identitetssporet — brusehovedet, morgenritualet, hud og hår, dunken — kræver nul påstande, har derfor nul juridisk risiko, virker for de 36 % der falder ud af frygt-funnelen, og er præcis det spor, creators kan bære uden en brief fuld af forbud. Hanen bliver stedet, hvor hun finder ud af, at brandet kan dokumentere sig.</p>
+        </div>
+
+        <div class="decision">
+          <span class="block-label">Beslutning</span>
+          <p>Bygger vi identitetssporet som sin egen kampagne med sin egen side — og bliver bruseren dermed vores ansigt udadtil, selvom hanen bærer beviset?</p>
+        </div>
+      </div>
+    </article>
+
+    <!-- 5 -->
+    <article class="topic">
+      <div class="topic-num">05</div>
+      <div class="topic-body">
+        <h3>Beviset er en investeringsbeslutning, ikke en copy-opgave</h3>
+        <p class="lede">Man klatrer fra niveau 3 til niveau 4 ved at udbygge mekanismen. Hvert trin på den stige koster en test. Copy kan ikke købe det.</p>
+
+        <div class="block">
+          <span class="block-label">Hvad vi faktisk kan dokumentere</span>
+          <ul class="facts">
+            <li><b>Af vandtjekkets fem parametre har vi dokumentation på én.</b> PFAS, <span class="num">95 %</span>, laboratoriemålt.</li>
+            <li><b>Pesticider:</b> evnen er bekræftet skriftligt af David, satsen er ikke. Kvalitativt, uden tal. DMS må ikke navngives som fjernet.</li>
+            <li><b>Nitrat, chlorid og natrium:</b> opløste ioner. Kul binder dem ikke. Det kræver ionbytning eller omvendt osmose — og det bliver aldrig løst med en overskrift.</li>
+            <li><b>Bruseren:</b> tre spørgsmål ligger stadig ubesvarede hos David — patronens model-ID i 8811, om de <span class="num">90 %</span> gælder den, og et datablad på bruseren med teststandard og levetid.</li>
+            <li><b>Eurofins er stadig ubestilt</b> og har den længste leadtime af alt, vi mangler.</li>
+          </ul>
+        </div>
+
+        <div class="rec">
+          <span class="block-label">Min anbefaling</span>
+          <p>Én mail til David denne uge med de tre spørgsmål, og Eurofins bestilt nu. <b>Et datablad på bruseren er det billigste, der findes, målt på hvad det gør ved copy:</b> det flytter bruseren fra »kun identitet« til »identitet plus mekanisme med tal« — og det er forskellen på én kampagne og to. Indtil da kører bruseren uden et eneste tal, og det gør den fint på, hvis punkt 3 og 4 godkendes.</p>
+        </div>
+
+        <div class="decision">
+          <span class="block-label">Beslutning</span>
+          <p>Bestiller vi Eurofins og kræver et brusedatablad nu — eller accepterer vi, at bruseren er kvalitativ hele vejen igennem launch?</p>
+        </div>
+      </div>
+    </article>
+
+  </section>
+
+  <section>
+    <h2 class="section-title">Claims-hovedbogen — den I skal have på skærmen, når der skrives</h2>
+    <div class="ledger">
+
+      <div class="sheet">
+        <div class="sheet-head">
+          <h3>Hanen</h3>
+          <span class="status doc"><span class="dot"></span>Dokumenteret · niveau 3</span>
+        </div>
+        <div class="sheet-col yes">
+          <span class="block-label">Må siges</span>
+          <ul class="spec">
+            <li>PFAS <b class="num">95 %</b> — PFOA og PFOS</li>
+            <li>Klor <b class="num">99 %</b></li>
+            <li><b class="num">1.200</b> liter · <b class="num">2</b> l/min · fødevaregodkendt ABS</li>
+            <li>Testet efter <b>NSF/ANSI 42 og 53</b></li>
+            <li><b>Pesticidrester</b> — uden sats</li>
+            <li>Kvalitativt: sediment, rust, alger, mikroplast, bly, bakterier</li>
+            <li>PFAS og pesticider i samme sætning om samme patron</li>
+            <li>»Udvalgt og testet i Danmark«</li>
+          </ul>
+        </div>
+        <div class="sheet-col no">
+          <span class="block-label">Må ikke siges</span>
+          <ul class="spec">
+            <li><b class="num">98 %</b> på PFAS — brug <span class="num">95</span></li>
+            <li><b class="num">90 %</b> på pesticider — evnen er bekræftet, satsen er ikke</li>
+            <li><b class="num">99,9 %</b> på mikroplast om 8277C</li>
+            <li>Katalogtal lånt fra de andre patronblade — <b>benzen, trichlorethylen, tetrachlorethylen</b> står kun på 8277, A, B og D</li>
+            <li>Løfter om <b>nitrat, chlorid eller natrium</b></li>
+            <li>At kundens konkrete <b>DMS-tal</b> bliver løst</li>
+            <li>»Made in Denmark« · dansk design · danskudviklet</li>
+            <li><b>®</b> før varemærket er registreret</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="sheet">
+        <div class="sheet-head">
+          <h3>Bruseren</h3>
+          <span class="status undoc"><span class="dot hollow"></span>Udokumenteret · niveau 5</span>
+        </div>
+        <div class="sheet-col yes">
+          <span class="block-label">Må siges</span>
+          <ul class="spec">
+            <li><b>KDF-laget:</b> tungmetaller, tolværdigt jern, svovlbrinte — hæmmer mikrobiel vækst</li>
+            <li><b>Aminosyre-laget:</b> binder calcium og magnesium, så kalken ikke aflejrer</li>
+            <li><b>Kulfiber</b> — nævnes som materiale, ikke som effekt</li>
+            <li>Produktegenskaber, montering, design, ritual, identitet</li>
+            <li>»Vi skriver ikke et tal, vi ikke har målt«</li>
+          </ul>
+        </div>
+        <div class="sheet-col no">
+          <span class="block-label">Må ikke siges</span>
+          <ul class="spec">
+            <li><b>Et eneste tal.</b> Der findes ingen procenter, intet laboratorium, ingen teststandard</li>
+            <li>Klor <b class="num">99</b> og <b class="num">80 %</b> — tilhørte S003, S005 og S006, udgået 28/8</li>
+            <li><b>PFAS.</b> Bruseren må aldrig arve hanens tal</li>
+            <li><b>Kalkfjernelse.</b> Aminosyren binder, den fjerner ikke — vandet er lige så hårdt bagefter</li>
+            <li><b>Sterilisering og algefjernelse</b></li>
+            <li><b>Hårtab.</b> Leverandøren skriver »alleviating hair loss«. Det er en effektpåstand på kroppen</li>
+            <li>Enhver sundhedsanprisning om, hvad vandet gør ved kroppen</li>
+          </ul>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="both" style="margin-top:1.25rem;">
+      <span class="block-label">Gælder begge, uden undtagelse</span>
+      <ul>
+        <li>Ingen opfundne anmeldelsestal, ingen falsk knaphed, ingen fake førpriser, ingen countdown.</li>
+        <li>Vi nævner aldrig konkurrenten. Analysen er til os, aldrig til en annonce — ingen sammenligningstabeller.</li>
+        <li>Ingen undervisende ord i de første tre sekunder. Staten har betalt for den undervisning; vi lægger os oven på den.</li>
+        <li>En »før-pris« skal være den reelt laveste pris de seneste 30 dage — gælder også en creator-kodes rabat.</li>
+        <li>Vi må sige, hvad filteret fjerner. Ikke hvad det gør ved kroppen.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="close">
+    <span class="block-label">Det ene spørgsmål, mødet skal svare på</span>
+    <blockquote>Sælger vi bevis eller identitet først? Hanen siger bevis. Bruseren siger identitet. De 36 % afgør det.</blockquote>
+  </section>
+
+  <footer>
+    Bygget på Sandhedsbasen og Qleer-databasen i Notion: 06 Filterspecifikation (28/8-2026) · Marketingplanen (30/7-2026) · Ads &amp; salgsvinkler (26/8-2026) · <span style="white-space:nowrap;">kanal-pdp-trafik-kommer-fra-rapportsiden</span> · <span style="white-space:nowrap;">produkt-brusepatron-acf-kdf</span>. Ingen tal på denne side er hentet fra hukommelsen.<br>
+    Åbne punkter, der kan flytte konklusionerne: ICP'en er ikke formelt afgjort · priskonflikten 75/129/249 mod 65/99/249 er stadig åben · YouTube-transskriptet er ikke lagt ind.
+  </footer>
+
+</div>
